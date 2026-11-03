@@ -886,40 +886,69 @@ function deleteNode(id) {
 }
 
 // ════════════════════════════════════════════════════════════
-//  运行流水线
+//  运行：按连线关系提取数据流
 // ════════════════════════════════════════════════════════════
-async function runFlow() {
-  if (nodes.length === 0) { addLog('画布为空，请先添加节点', 'error'); return; }
+function getUpstream(nodeId) {
+  return edges.filter(e => e.target === nodeId).map(e => nodes.find(n => n.id === e.source)).filter(Boolean);
+}
 
-  // 从画布节点提取运行参数
-  const datasetNode = nodes.find(n => n.type === 'dataset' || n.type === 'csv_upload');
+function getUpstreamByType(nodeId, type) {
+  const direct = getUpstream(nodeId);
+  for (const n of direct) {
+    if (n.type === type) return n;
+    const found = getUpstreamByType(n.id, type);
+    if (found) return found;
+  }
+  return null;
+}
+
+async function runFlow() {
+  if (nodes.length === 0) { addLog('画布为空，请从左栏拖拽节点', 'error'); return; }
+
+  const datasetNode = nodes.find(n => (n.type === 'dataset' || n.type === 'csv_upload'));
+  if (!datasetNode) { addLog('缺少数据集节点，请拖入一个', 'error'); return; }
+
   const modelNodes = nodes.filter(n => n.type === 'model');
-  const splitNode = nodes.find(n => n.type === 'split');
-  const llmConfigNode = nodes.find(n => n.type === 'llm_config');
+  if (modelNodes.length === 0) { addLog('缺少模型节点，请拖入至少一个', 'error'); return; }
+
+  // 检查哪些 model 有连线上游
+  const connectedModels = modelNodes.filter(m => edges.some(e => e.target === m.id));
+  const modelsToRun = connectedModels.length > 0 ? connectedModels : modelNodes;
+
+  const modelNames = modelsToRun.map(n => n.config.model_name).filter(Boolean);
+  if (modelNames.length === 0) { addLog('模型节点未选择模型（右栏配置模型名）', 'error'); return; }
+
+  // split: 优先从 model 上游找
+  let splitNode = null;
+  for (const m of modelsToRun) {
+    splitNode = getUpstreamByType(m.id, 'split');
+    if (splitNode) break;
+  }
+  if (!splitNode) splitNode = nodes.find(n => n.type === 'split');
+
+  // LLM config: 从 llm_pre/llm_post 上游找
+  let llmConfigNode = null;
+  const llmPre = nodes.find(n => n.type === 'llm_pre');
+  const llmPostNode = nodes.find(n => n.type === 'llm_post');
+  if (llmPre) llmConfigNode = getUpstreamByType(llmPre.id, 'llm_config');
+  if (!llmConfigNode && llmPostNode) llmConfigNode = getUpstreamByType(llmPostNode.id, 'llm_config');
+  if (!llmConfigNode) llmConfigNode = nodes.find(n => n.type === 'llm_config');
+
   const searchNode = nodes.find(n => n.type === 'search');
   const comparisonNode = nodes.find(n => n.type === 'comparison');
-  const llmPreNode = nodes.find(n => n.type === 'llm_pre');
-  const llmPostNode = nodes.find(n => n.type === 'llm_post');
-
-  if (!datasetNode) { addLog('缺少数据集节点', 'error'); return; }
-  if (modelNodes.length === 0) { addLog('缺少模型节点', 'error'); return; }
-
-  const modelNames = modelNodes.map(n => n.config.model_name).filter(Boolean);
-  if (modelNames.length === 0) { addLog('模型节点未选择模型', 'error'); return; }
 
   const body = {
     model_names: modelNames,
     dataset_name: datasetNode.config.dataset_name || 'diabetes',
-    test_size: splitNode ? splitNode.config.test_size : 0.2,
-    seed: splitNode ? splitNode.config.seed : 42,
-    select_best: comparisonNode ? comparisonNode.config.select_best : false,
-    llm_post_scope: llmPostNode ? llmPostNode.config.llm_post_scope : 'all',
+    test_size: splitNode ? (parseFloat(splitNode.config.test_size) || 0.2) : 0.2,
+    seed: splitNode ? (parseInt(splitNode.config.seed) || 42) : 42,
+    select_best: comparisonNode ? (comparisonNode.config.select_best === true || comparisonNode.config.select_best === 'true') : false,
+    llm_post_scope: llmPostNode ? (llmPostNode.config.llm_post_scope || 'all') : 'all',
     search: !!searchNode,
-    n_iter: searchNode ? searchNode.config.n_iter : 10,
-    cv: searchNode ? searchNode.config.cv : 5,
+    n_iter: searchNode ? (parseInt(searchNode.config.n_iter) || 10) : 10,
+    cv: searchNode ? (parseInt(searchNode.config.cv) || 5) : 5,
   };
 
-  // LLM 配置
   if (llmConfigNode) {
     body.llm_provider = llmConfigNode.config.provider || '';
     body.llm_api_key = llmConfigNode.config.api_key || '';
@@ -928,12 +957,29 @@ async function runFlow() {
     body.llm_timeout = llmConfigNode.config.timeout || 120;
   }
 
+  if (datasetNode.type === 'csv_upload' && datasetNode.config.filepath) {
+    body.csv_config = {
+      name: datasetNode.config.dataset_name || 'csv_data',
+      filepath: datasetNode.config.filepath,
+      target_column: datasetNode.config.target_column || '',
+      task_type: datasetNode.config.task_type || 'regression',
+    };
+  }
+
   addLog(`启动流水线: 模型=${modelNames}, 数据集=${body.dataset_name}`);
+  if (llmConfigNode && body.llm_provider) addLog(`LLM: ${body.llm_provider}/${body.llm_model}`);
+  if (splitNode) addLog(`切分: test_size=${body.test_size}, seed=${body.seed}`);
+  if (searchNode) addLog(`搜索: n_iter=${body.n_iter}, cv=${body.cv}`);
   setStatus('running', '运行中...');
   document.getElementById('btnRun').disabled = true;
 
-  // 标记所有节点为 running
-  nodes.forEach(n => n.status = 'running');
+  modelsToRun.forEach(n => n.status = 'running');
+  if (datasetNode) datasetNode.status = 'running';
+  if (splitNode) splitNode.status = 'running';
+  if (llmPre) llmPre.status = 'running';
+  if (llmPostNode) llmPostNode.status = 'running';
+  if (comparisonNode) comparisonNode.status = 'running';
+  if (searchNode) searchNode.status = 'running';
   renderCanvas();
 
   try {
