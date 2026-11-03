@@ -197,7 +197,7 @@ def api_config():
 
 
 def main():
-    port = int(os.environ.get("LOOM_PORT", 5000))
+    port = int(os.environ.get("LOOM_PORT", 8899))
     print(f"Loom Web 控制台启动中...")
     print(f"访问 http://localhost:{port}")
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)

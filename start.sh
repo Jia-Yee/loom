@@ -55,7 +55,7 @@ echo ""
 case "$MODE" in
     web)
         echo "▶ 启动 Web 控制台..."
-        echo "  浏览器访问: http://localhost:5000"
+        echo "  浏览器访问: http://localhost:8899"
         echo "  按 Ctrl+C 停止"
         echo ""
         exec $PYTHON server.py
