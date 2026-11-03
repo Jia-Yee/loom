@@ -50,6 +50,73 @@ def api_datasets():
     return jsonify({"datasets": list_datasets(task_type=task_type)})
 
 
+@app.route("/api/dataset/<name>/preview")
+def api_dataset_preview(name):
+    """返回数据集预览和统计分析。"""
+    try:
+        ds_cls = _core.get_dataset_class(name)
+        ds = ds_cls()
+        X, y = ds.load()
+        feat_names = ds.feature_names()
+
+        import numpy as np
+        # 前 10 行预览
+        preview = []
+        for i in range(min(10, X.shape[0])):
+            row = {fn: float(X[i][j]) for j, fn in enumerate(feat_names)}
+            row["_target"] = float(y[i])
+            preview.append(row)
+
+        # 特征统计
+        feature_stats = []
+        for j, fn in enumerate(feat_names):
+            col = X[:, j]
+            feature_stats.append({
+                "name": fn,
+                "mean": float(np.mean(col)),
+                "std": float(np.std(col)),
+                "min": float(np.min(col)),
+                "max": float(np.max(col)),
+                "median": float(np.median(col)),
+                "missing": int(np.isnan(col).sum()),
+            })
+
+        # 目标统计
+        target_stats = {
+            "mean": float(np.mean(y)),
+            "std": float(np.std(y)),
+            "min": float(np.min(y)),
+            "max": float(np.max(y)),
+            "median": float(np.median(y)),
+        }
+
+        # 相关性（目标与各特征）
+        correlations = []
+        for j, fn in enumerate(feat_names):
+            if np.std(X[:, j]) > 0 and np.std(y) > 0:
+                corr = float(np.corrcoef(X[:, j], y)[0, 1])
+            else:
+                corr = 0.0
+            correlations.append({"feature": fn, "correlation": corr})
+
+        # 按相关性绝对值排序
+        correlations.sort(key=lambda x: abs(x["correlation"]), reverse=True)
+
+        return jsonify({
+            "status": "success",
+            "n_samples": X.shape[0],
+            "n_features": X.shape[1],
+            "feature_names": feat_names,
+            "task_type": ds.task_type,
+            "preview": preview,
+            "feature_stats": feature_stats,
+            "target_stats": target_stats,
+            "correlations": correlations,
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"{type(e).__name__}: {e}"}), 404
+
+
 @app.route("/api/upload_csv", methods=["POST"])
 def api_upload_csv():
     """上传 CSV 文件，返回列名供用户选择目标列。"""
@@ -184,6 +251,33 @@ def api_get_run(run_id):
         return jsonify({"status": "success", "data": detail})
     except KeyError as e:
         return jsonify({"status": "error", "message": str(e)}), 404
+
+
+@app.route("/api/run/<run_id>/nodes")
+def api_get_run_nodes(run_id):
+    """返回某次运行的完整 nodes/edges，用于历史回看。"""
+    import sqlite3, json as _json
+    _store = import_module(f"{_PKG}.core.store")
+    db_path = _store._db_path()
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute("SELECT * FROM runs WHERE run_id=?", (run_id,)).fetchone()
+        if not row:
+            return jsonify({"status": "error", "message": "run_id 不存在"}), 404
+        nodes = _json.loads(row["nodes"]) if row["nodes"] else []
+        edges = _json.loads(row["edges"]) if row["edges"] else []
+        return jsonify({
+            "status": "success",
+            "run_id": run_id,
+            "dataset_name": row["dataset_name"],
+            "best_model": row["best_model"],
+            "timestamp": row["timestamp"],
+            "nodes": nodes,
+            "edges": edges,
+        })
+    finally:
+        conn.close()
 
 
 @app.route("/api/config")

@@ -28,7 +28,9 @@ def _init_tables(conn: sqlite3.Connection) -> None:
             run_id       TEXT PRIMARY KEY,
             dataset_name TEXT NOT NULL,
             timestamp    TEXT NOT NULL,
-            best_model   TEXT
+            best_model   TEXT,
+            nodes        TEXT,           -- 完整 nodes JSON（新增）
+            edges        TEXT            -- 完整 edges JSON（新增）
         );
 
         CREATE TABLE IF NOT EXISTS metrics (
@@ -36,6 +38,8 @@ def _init_tables(conn: sqlite3.Connection) -> None:
             model_name  TEXT NOT NULL,
             task_type   TEXT NOT NULL,
             metrics     TEXT NOT NULL,  -- JSON
+            params      TEXT,           -- 模型参数 JSON（新增）
+            search_info TEXT,           -- 搜索信息 JSON（新增）
             PRIMARY KEY (run_id, model_name),
             FOREIGN KEY (run_id) REFERENCES runs(run_id)
         );
@@ -50,6 +54,17 @@ def _init_tables(conn: sqlite3.Connection) -> None:
             FOREIGN KEY (run_id) REFERENCES runs(run_id)
         );
     """)
+    # 兼容旧库：如果表已存在但缺列，自动补列
+    for col, ddl in [("nodes", "TEXT"), ("edges", "TEXT")]:
+        try:
+            conn.execute(f"ALTER TABLE runs ADD COLUMN {col} {ddl}")
+        except sqlite3.OperationalError:
+            pass  # 列已存在
+    for col, ddl in [("params", "TEXT"), ("search_info", "TEXT")]:
+        try:
+            conn.execute(f"ALTER TABLE metrics ADD COLUMN {col} {ddl}")
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
 
 
@@ -60,27 +75,34 @@ def save_run(result: dict, dataset_name: str) -> None:
         run_id = result["run_id"]
         best_model = result.get("best_model")
         ts = datetime.now().isoformat()
+        nodes_json = json.dumps(result.get("nodes", []), ensure_ascii=False)
+        edges_json = json.dumps(result.get("edges", []), ensure_ascii=False)
 
         conn.execute(
-            "INSERT OR REPLACE INTO runs (run_id, dataset_name, timestamp, best_model) VALUES (?, ?, ?, ?)",
-            (run_id, dataset_name, ts, best_model),
+            "INSERT OR REPLACE INTO runs (run_id, dataset_name, timestamp, best_model, nodes, edges) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (run_id, dataset_name, ts, best_model, nodes_json, edges_json),
         )
 
-        # metrics 表
+        # metrics 表（含参数和搜索信息）
         for model_name, m in result["metrics"].items():
-            # 从 nodes 中找 task_type
             task_type = "regression"
-            for node in result["nodes"]:
+            params = None
+            search_info = None
+            for node in result.get("nodes", []):
                 if node["type"] == "dataset":
                     task_type = node["display"].get("task_type", "regression")
-                    break
+                if node["type"] == "model" and node["display"].get("model_name") == model_name:
+                    params = json.dumps(node["display"].get("params"), ensure_ascii=False)
+                    search_info = json.dumps(node["display"].get("search_info"), ensure_ascii=False)
             conn.execute(
-                "INSERT OR REPLACE INTO metrics (run_id, model_name, task_type, metrics) VALUES (?, ?, ?, ?)",
-                (run_id, model_name, task_type, json.dumps(m, ensure_ascii=False)),
+                "INSERT OR REPLACE INTO metrics (run_id, model_name, task_type, metrics, params, search_info) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (run_id, model_name, task_type, json.dumps(m, ensure_ascii=False), params, search_info),
             )
 
         # llm_analysis 表
-        for node in result["nodes"]:
+        for node in result.get("nodes", []):
             if node["type"] != "llm_analysis":
                 continue
             d = node["display"]
