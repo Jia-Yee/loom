@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Loom — AutoML 流水线画布</title>
+<style>
+  :root {
+    --bg: #f5f5f7;
+    --surface: #ffffff;
+    --text: #1d1d1f;
+    --text-light: #86868b;
+    --border: #d2d2d7;
+    --accent: #4a7c59;
+    --status-success: #34c759;
+    --status-running: #007aff;
+    --status-failed: #ff3b30;
+    --status-skipped: #8e8e93;
+    --node-width: 220px;
+    --shadow: 0 2px 12px rgba(0,0,0,0.08);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    height: 100vh;
+  }
+
+  /* ── 顶栏 ─────────────────────────────────────── */
+  .toolbar {
+    height: 52px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 16px;
+    z-index: 10;
+    position: relative;
+  }
+  .toolbar h1 { font-size: 1.1rem; font-weight: 600; }
+  .toolbar .spacer { flex: 1; }
+  .toolbar button {
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.15s;
+  }
+  .toolbar button:hover { background: #f0f0f5; }
+  .toolbar .file-label {
+    font-size: 0.8rem;
+    color: var(--text-light);
+  }
+
+  /* ── 画布 ─────────────────────────────────────── */
+  .canvas-container {
+    position: relative;
+    width: 100%;
+    height: calc(100vh - 52px);
+    overflow: hidden;
+    background:
+      radial-gradient(circle, #d2d2d7 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+  .canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    transform-origin: 0 0;
+  }
+
+  /* ── 节点 ─────────────────────────────────────── */
+  .node {
+    position: absolute;
+    width: var(--node-width);
+    background: var(--surface);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    cursor: grab;
+    user-select: none;
+    transition: box-shadow 0.15s;
+    z-index: 2;
+  }
+  .node:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.12); }
+  .node.dragging { cursor: grabbing; z-index: 100; box-shadow: 0 8px 30px rgba(0,0,0,0.2); }
+
+  /* 状态边框 */
+  .node.status-success { border: 2px solid var(--status-success); }
+  .node.status-running { border: 2px solid var(--status-running); animation: pulse 1.5s infinite; }
+  .node.status-failed  { border: 2px solid var(--status-failed); }
+  .node.status-skipped { border: 2px dashed var(--status-skipped); opacity: 0.7; }
+
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(0,122,255,0.3); }
+    50% { box-shadow: 0 0 0 8px rgba(0,122,255,0); }
+  }
+
+  .node-header {
+    padding: 8px 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .node-type-icon { font-size: 1rem; }
+  .node-body { padding: 10px 12px; font-size: 0.78rem; line-height: 1.6; }
+  .node-body .field { margin-bottom: 4px; }
+  .node-body .field-label { color: var(--text-light); }
+  .node-body .field-value { font-weight: 500; }
+  .node-body .tag-list { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+  .node-body .tag {
+    padding: 1px 6px; border-radius: 4px; font-size: 0.7rem;
+    background: #e8f0eb; color: var(--accent);
+  }
+  .node-body .skipped-text { color: var(--status-skipped); font-style: italic; }
+  .node-body .llm-content {
+    white-space: pre-wrap; max-height: 200px; overflow-y: auto;
+    background: #f5f5f7; padding: 8px; border-radius: 6px; font-size: 0.72rem;
+  }
+  .node-body .structured-card {
+    background: #f0f5ff; padding: 8px; border-radius: 6px; font-size: 0.72rem;
+  }
+  .node-body .feature-list {
+    max-height: 120px; overflow-y: auto; margin-top: 4px;
+  }
+  .node-body .feature-list .feature-tag {
+    display: inline-block; padding: 1px 5px; margin: 1px;
+    background: #e8f0eb; border-radius: 3px; font-size: 0.68rem;
+  }
+  .node-body .collapsible-toggle {
+    cursor: pointer; color: var(--accent); font-size: 0.7rem; margin-top: 2px;
+  }
+  .node-body .best-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    background: #fff3cd; color: #856404; font-size: 0.68rem; font-weight: 600;
+    margin-left: 4px;
+  }
+
+  /* ── 连线 SVG ─────────────────────────────────── */
+  .edges-svg {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 1;
+  }
+  .edge-path {
+    fill: none;
+    stroke: var(--border);
+    stroke-width: 2;
+  }
+  .edge-arrow {
+    fill: var(--border);
+  }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <h1>Loom 画布</h1>
+  <label class="file-label">数据: <span id="file-name">nodes.json</span></label>
+  <div class="spacer"></div>
+  <button onclick="loadFile()">重新加载</button>
+  <button onclick="resetLayout()">重置布局</button>
+  <button onclick="toggleFeatures()">折叠/展开特征</button>
+</div>
+
+<div class="canvas-container" id="canvas-container">
+  <svg class="edges-svg" id="edges-svg"></svg>
+  <div class="canvas" id="canvas"></div>
+</div>
+
+<script>
+// ── 状态 ──────────────────────────────────────────
+let nodeData = { nodes: [], edges: [] };
+let initialPositions = {};
+let featuresCollapsed = false;
+
+const NODE_ICONS = {
+  dataset: '📊', model: '🤖', metric: '📈', llm_analysis: '🧠', comparison: '⚖️'
+};
+
+// ── 加载 nodes.json ──────────────────────────────
+async function loadFile() {
+  try {
+    const resp = await fetch('nodes.json');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    nodeData = data;
+    // 保存初始位置
+    initialPositions = {};
+    data.nodes.forEach(n => {
+      initialPositions[n.id] = { ...n.position };
+    });
+    render();
+  } catch (e) {
+    // 尝试内嵌数据
+    console.error('加载失败:', e);
+    document.getElementById('canvas').innerHTML =
+      '<div style="padding:40px;color:#888;">无法加载 nodes.json。请确保通过 HTTP 服务访问，或将 nodes.json 放在同目录下。</div>';
+  }
+}
+
+// ── 渲染 ──────────────────────────────────────────
+function render() {
+  const canvas = document.getElementById('canvas');
+  const svg = document.getElementById('edges-svg');
+  canvas.innerHTML = '';
+  svg.innerHTML = '';
+
+  // 渲染节点
+  nodeData.nodes.forEach(node => {
+    const el = document.createElement('div');
+    el.className = `node status-${node.status}`;
+    el.id = `node-${node.id}`;
+    el.style.left = `${node.position.x}px`;
+    el.style.top = `${node.position.y}px`;
+    el.innerHTML = renderNodeContent(node);
+    canvas.appendChild(el);
+    makeDraggable(el, node);
+  });
+
+  // 渲染连线（等 DOM 更新后）
+  requestAnimationFrame(() => renderEdges());
+}
+
+function renderNodeContent(node) {
+  const icon = NODE_ICONS[node.type] || '❓';
+  let body = '';
+
+  switch (node.type) {
+    case 'dataset':
+      body = renderDataset(node);
+      break;
+    case 'model':
+      body = renderModel(node);
+      break;
+    case 'metric':
+      body = renderMetric(node);
+      break;
+    case 'llm_analysis':
+      body = renderLLM(node);
+      break;
+    case 'comparison':
+      body = renderComparison(node);
+      break;
+  }
+
+  return `<div class="node-header">${icon} ${node.label}</div><div class="node-body">${body}</div>`;
+}
+
+function renderDataset(node) {
+  const d = node.display;
+  const features = (d.feature_names || []).map(f =>
+    `<span class="feature-tag">${f}</span>`
+  ).join('');
+  return `
+    <div class="field"><span class="field-label">样本数:</span> <span class="field-value">${d.n_samples}</span></div>
+    <div class="field"><span class="field-label">特征数:</span> <span class="field-value">${d.n_features}</span></div>
+    <div class="field"><span class="field-label">任务类型:</span> <span class="field-value">${d.task_type}</span></div>
+    <div class="field"><span class="field-label">特征名:</span></div>
+    <div class="feature-list ${featuresCollapsed ? 'hidden' : ''}">${features}</div>
+  `;
+}
+
+function renderModel(node) {
+  const d = node.display;
+  let params = '';
+  if (d.params) {
+    params = Object.entries(d.params).map(([k, v]) => {
+      let val = v;
+      if (Array.isArray(v) && v.length > 3) val = `[${v.length} items]`;
+      else if (Array.isArray(v)) val = `[${v.map(x => typeof x === 'number' ? x.toFixed(3) : x).join(', ')}]`;
+      else if (typeof v === 'number' && v % 1 !== 0) val = v.toFixed(4);
+      return `<div class="field"><span class="field-label">${k}:</span> <span class="field-value">${val}</span></div>`;
+    }).join('');
+  }
+  let searchInfo = '';
+  if (d.search_info && d.search_info.enabled) {
+    searchInfo = `<div class="field" style="color:var(--accent);">🔍 搜索: score=${d.search_info.best_score?.toFixed(4)}</div>`;
+  }
+  return `<div class="field"><span class="field-label">模型:</span> <span class="field-value">${d.model_name}</span></div>${params}${searchInfo}`;
+}
+
+function renderMetric(node) {
+  const d = node.display;
+  let fields = '';
+  for (const [k, v] of Object.entries(d)) {
+    if (k === 'model_name') continue;
+    const val = typeof v === 'number' ? v.toFixed(4) : v;
+    fields += `<div class="field"><span class="field-label">${k.toUpperCase()}:</span> <span class="field-value">${val}</span></div>`;
+  }
+  return `<div class="field"><span class="field-label">模型:</span> <span class="field-value">${d.model_name}</span></div>${fields}`;
+}
+
+function renderLLM(node) {
+  const d = node.display;
+  if (node.status === 'skipped') {
+    return `<div class="skipped-text">已跳过</div>`;
+  }
+  let content = '';
+  if (d.structured && !d.parse_failed) {
+    content = `<div class="structured-card">${formatJSON(d.structured)}</div>`;
+  } else {
+    content = `<div class="llm-content">${escapeHTML(d.content || '(无内容)')}</div>`;
+  }
+  const modelLabel = d.model_name ? ` (${d.model_name})` : '';
+  return `<div class="field"><span class="field-label">阶段:</span> <span class="field-value">${d.stage === 'pre_train' ? '训练前' : '训练后'}${modelLabel}</span></div>${content}`;
+}
+
+function renderComparison(node) {
+  const d = node.display;
+  let rows = (d.models || []).map(m => {
+    const best = m.is_best ? '<span class="best-badge">⭐ 最优</span>' : '';
+    const mse = typeof m.mse === 'number' ? m.mse.toFixed(4) : 'N/A';
+    const r2 = typeof m.r2 === 'number' ? m.r2.toFixed(4) : 'N/A';
+    return `<div class="field">${m.model_name}${best}<br><span class="field-label">MSE=${mse}  R²=${r2}</span></div>`;
+  }).join('');
+  return `<div class="field"><span class="field-label">最优:</span> <span class="field-value">${d.best_model || 'N/A'}</span></div><hr style="border:none;border-top:1px solid var(--border);margin:6px 0;">${rows}`;
+}
+
+// ── 连线渲染 ──────────────────────────────────────
+function renderEdges() {
+  const svg = document.getElementById('edges-svg');
+  svg.innerHTML = '';
+  const container = document.getElementById('canvas-container');
+  svg.setAttribute('width', container.scrollWidth);
+  svg.setAttribute('height', container.scrollHeight);
+
+  nodeData.edges.forEach(edge => {
+    const sourceEl = document.getElementById(`node-${edge.source}`);
+    const targetEl = document.getElementById(`node-${edge.target}`);
+    if (!sourceEl || !targetEl) return;
+
+    const sRect = sourceEl.getBoundingClientRect();
+    const tRect = targetEl.getBoundingClientRect();
+    const cRect = container.getBoundingClientRect();
+
+    // 连接点：源节点右侧中点 → 目标节点左侧中点
+    const x1 = sRect.right - cRect.left;
+    const y1 = sRect.top + sRect.height / 2 - cRect.top;
+    const x2 = tRect.left - cRect.left;
+    const y2 = tRect.top + tRect.height / 2 - cRect.top;
+
+    // 贝塞尔曲线
+    const dx = Math.abs(x2 - x1) * 0.5;
+    const path = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
+
+    const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    pathEl.setAttribute('d', path);
+    pathEl.setAttribute('class', 'edge-path');
+    svg.appendChild(pathEl);
+
+    // 箭头
+    const angle = Math.atan2(y2 - y1, x2 - x1);
+    const arrowSize = 8;
+    const ax = x2 - arrowSize * Math.cos(angle - Math.PI / 6);
+    const ay = y2 - arrowSize * Math.sin(angle - Math.PI / 6);
+    const bx = x2 - arrowSize * Math.cos(angle + Math.PI / 6);
+    const by = y2 - arrowSize * Math.sin(angle + Math.PI / 6);
+    const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    arrow.setAttribute('points', `${x2},${y2} ${ax},${ay} ${bx},${by}`);
+    arrow.setAttribute('class', 'edge-arrow');
+    svg.appendChild(arrow);
+  });
+}
+
+// ── 拖动 ──────────────────────────────────────────
+function makeDraggable(el, node) {
+  let isDragging = false;
+  let startX, startY, origX, origY;
+
+  el.addEventListener('mousedown', (e) => {
+    isDragging = true;
+    el.classList.add('dragging');
+    startX = e.clientX;
+    startY = e.clientY;
+    origX = node.position.x;
+    origY = node.position.y;
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    node.position.x = origX + (e.clientX - startX);
+    node.position.y = origY + (e.clientY - startY);
+    el.style.left = `${node.position.x}px`;
+    el.style.top = `${node.position.y}px`;
+    renderEdges();
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (isDragging) {
+      isDragging = false;
+      el.classList.remove('dragging');
+    }
+  });
+}
+
+// ── 工具函数 ──────────────────────────────────────
+function resetLayout() {
+  nodeData.nodes.forEach(n => {
+    if (initialPositions[n.id]) {
+      n.position = { ...initialPositions[n.id] };
+    }
+  });
+  render();
+}
+
+function toggleFeatures() {
+  featuresCollapsed = !featuresCollapsed;
+  render();
+}
+
+function formatJSON(obj) {
+  return escapeHTML(JSON.stringify(obj, null, 2));
+}
+
+function escapeHTML(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ── 启动 ──────────────────────────────────────────
+loadFile();
+</script>
+
+</body>
+</html>
