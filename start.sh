@@ -1,19 +1,24 @@
 #!/usr/bin/env bash
-# Loom Loom AutoML 框架启动脚本
+# Loom AutoML 框架启动脚本
 # 用法:
-#   ./start.sh          # 命令行模式
-#   ./start.sh web       # Web 控制台模式
-#   ./start.sh history   # 查看历史
+#   ./start.sh              # 命令行模式
+#   ./start.sh web          # Web 控制台（热加载，改代码自动重启）
+#   ./start.sh web --no-reload  # Web 控制台（关闭热加载）
+#   ./start.sh history     # 查看历史
 
 set -e
 
 PYTHON="${PYTHON:-python3}"
 MODE="${1:-cli}"
+RELOAD="true"
+if [ "$2" = "--no-reload" ]; then
+    RELOAD="false"
+fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "================================================"
-echo "  Loom — 可扩展 Loom AutoML 框架"
+echo "  Loom — 可扩展 AutoML 框架"
 echo "================================================"
 echo ""
 
@@ -56,9 +61,24 @@ case "$MODE" in
     web)
         echo "▶ 启动 Web 控制台..."
         echo "  浏览器访问: http://localhost:8899"
+        if [ "$RELOAD" = "true" ]; then
+            echo "  热加载已开启（修改代码自动重启）"
+            echo "  关闭热加载: ./start.sh web --no-reload"
+        else
+            echo "  热加载已关闭"
+        fi
         echo "  按 Ctrl+C 停止"
         echo ""
-        exec $PYTHON server.py
+        if [ "$RELOAD" = "true" ]; then
+            exec $PYTHON -c "
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath('server.py')))
+from server import app
+app.run(host='0.0.0.0', port=int(os.environ.get('LOOM_PORT', 8899)), debug=True, use_reloader=True, threaded=True)
+"
+        else
+            exec $PYTHON server.py
+        fi
         ;;
     history)
         exec $PYTHON main.py --history
