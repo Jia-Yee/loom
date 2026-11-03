@@ -963,16 +963,20 @@ async function runFlow() {
         } else if (data.type === 'done') {
           // 用后端返回的 nodes/edges 更新画布
           if (data.nodes) {
-            // 保留用户画布上的位置，更新状态和 display
+            // 保留用户画布上的位置，用后端结果更新状态和 display
+            const newNodes = [];
             for (const srvNode of data.nodes) {
-              const localNode = nodes.find(n => n.type === srvNode.type || n.id === srvNode.id);
-              // 直接用后端的 nodes 替换
+              const existing = nodes.find(ln => ln.id === srvNode.id || ln.type === srvNode.type);
+              const def = NODE_TYPES[srvNode.type] || { color: '#666' };
+              newNodes.push({
+                ...srvNode,
+                color: def.color,
+                x: existing ? existing.x : (srvNode.position?.x || 0),
+                y: existing ? existing.y : (srvNode.position?.y || 0),
+                config: existing ? existing.config : {},
+              });
             }
-            // 简单替换：用后端返回的 nodes
-            nodes = data.nodes.map(n => {
-              const existing = nodes.find(ln => ln.id === n.id || ln.type === n.type);
-              return { ...n, x: existing ? existing.x : n.position.x, y: existing ? existing.y : n.position.y };
-            });
+            nodes = newNodes;
             edges = data.edges.map(e => ({ source: e.source, target: e.target }));
           }
           renderCanvas();
