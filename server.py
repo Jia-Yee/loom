@@ -294,6 +294,70 @@ def api_config():
     })
 
 
+# ── 代码查看与编辑 ─────────────────────────────────────
+@app.route("/api/code")
+def api_list_code():
+    """列出所有可查看的源码文件。"""
+    import glob
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    files = []
+    for pattern in ["core/*.py", "models/*.py", "datasets/*.py", "*.py"]:
+        for f in sorted(glob.glob(os.path.join(base_dir, pattern))):
+            rel = os.path.relpath(f, base_dir)
+            size = os.path.getsize(f)
+            files.append({"path": rel, "size": size})
+    return jsonify({"files": files})
+
+
+@app.route("/api/code/<path:filepath>")
+def api_get_code(filepath):
+    """获取源码文件内容。"""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    full_path = os.path.join(base_dir, filepath)
+    # 安全检查：不允许路径穿越
+    if not os.path.realpath(full_path).startswith(os.path.realpath(base_dir)):
+        return jsonify({"status": "error", "message": "路径不合法"}), 403
+    if not os.path.isfile(full_path):
+        return jsonify({"status": "error", "message": "文件不存在"}), 404
+    try:
+        with open(full_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        return jsonify({
+            "status": "success",
+            "path": filepath,
+            "content": content,
+            "size": len(content),
+            "lines": content.count("\n") + 1,
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/code/<path:filepath>", methods=["PUT"])
+def api_save_code(filepath):
+    """保存修改后的源码。"""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    full_path = os.path.join(base_dir, filepath)
+    if not os.path.realpath(full_path).startswith(os.path.realpath(base_dir)):
+        return jsonify({"status": "error", "message": "路径不合法"}), 403
+    if not os.path.isfile(full_path):
+        return jsonify({"status": "error", "message": "文件不存在"}), 404
+    data = request.json or {}
+    content = data.get("content", "")
+    try:
+        with open(full_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return jsonify({
+            "status": "success",
+            "path": filepath,
+            "message": "保存成功（热加载会自动重启）",
+            "size": len(content),
+            "lines": content.count("\n") + 1,
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @app.route("/api/llm_test", methods=["POST"])
 def api_llm_test():
     """测试 LLM 连通性。"""
