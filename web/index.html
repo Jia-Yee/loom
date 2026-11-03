@@ -220,6 +220,13 @@
     padding: 4px 10px; background: var(--surface2); border: 1px solid var(--accent);
     border-radius: 4px; font-size: 0.8rem; color: #fff; opacity: 0.8;
   }
+  /* ── Chat ─────────────────────────── */
+  .chat-msg { display: flex; gap: 10px; margin-bottom: 12px; }
+  .chat-msg.user { flex-direction: row-reverse; }
+  .chat-avatar { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.9rem; flex-shrink: 0; background: var(--surface2); }
+  .chat-msg.user .chat-avatar { background: var(--accent); }
+  .chat-text { max-width: 70%; padding: 8px 12px; border-radius: 10px; font-size: 0.88rem; line-height: 1.6; background: var(--surface2); color: var(--text); white-space: pre-wrap; word-break: break-word; }
+  .chat-msg.user .chat-text { background: var(--accent); color: #fff; }
 </style>
 </head>
 <body>
@@ -228,8 +235,9 @@
 <div class="topbar">
   <div class="logo">🌀 Loom</div>
   <div class="tab-switch">
-    <button class="active">流程编辑器</button>
-    <button onclick="location.href='/api/chat'">AI 对话</button>
+    <button id="tabFlow" class="active" onclick="switchTab('flow')">流程编辑器</button>
+    <button id="tabChat" onclick="switchTab('chat')">AI 对话</button>
+    <button id="tabCode" onclick="switchTab('code')">代码</button>
   </div>
   <div class="spacer"></div>
   <div class="status-dot" id="statusDot"></div>
@@ -240,7 +248,7 @@
 </div>
 
 <!-- 主布局 -->
-<div class="main">
+<div class="main" id="flowPanel" style="display:flex;">
 
   <!-- 左栏：节点库 -->
   <div class="sidebar-left">
@@ -289,6 +297,47 @@
   <div class="log-content" id="logPanel">
     <div class="log-line">Loom 流程编辑器已就绪。</div>
   </div>
+</div>
+
+<!-- AI 对话面板 -->
+<div id="chatPanel" style="display:none;flex:1;flex-direction:column;overflow:hidden;">
+  <div style="flex:1;overflow-y:auto;padding:16px;" id="chatMessages">
+    <div style="text-align:center;color:var(--text-light);padding:40px;">AI 对话 — 可询问代码、模型、结果相关问题</div>
+  </div>
+  <div style="padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;background:var(--surface);">
+    <textarea id="chatInput" placeholder="输入消息... (Enter 发送, Shift+Enter 换行)" rows="1" style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;resize:none;font-size:0.9rem;" onkeydown="onChatKey(event)" oninput="autoResize(this)"></textarea>
+    <button class="btn btn-primary" onclick="sendChat()">发送</button>
+  </div>
+  <div style="padding:4px 16px 8px;display:flex;gap:8px;flex-wrap:wrap;background:var(--surface);border-top:1px solid var(--border);">
+    <label style="font-size:0.8rem;color:var(--text-light);display:flex;align-items:center;gap:4px;"><input type="checkbox" id="chatIncludeCode"> 附带代码</label>
+    <label style="font-size:0.8rem;color:var(--text-light);display:flex;align-items:center;gap:4px;"><input type="checkbox" id="chatIncludeResults"> 附带结果</label>
+    <button class="btn" style="font-size:0.75rem;padding:2px 8px;" onclick="sendSuggestion('分析当前结果，给出改进建议')">分析结果</button>
+    <button class="btn" style="font-size:0.75rem;padding:2px 8px;" onclick="sendSuggestion('推荐适合 diabetes 数据集的模型')">推荐模型</button>
+  </div>
+</div>
+
+<!-- 代码面板 -->
+<div id="codePanel" style="display:none;flex:1;flex-direction:row;overflow:hidden;">
+  <div style="width:220px;border-right:1px solid var(--border);background:var(--surface);overflow-y:auto;padding:8px 0;">
+    <div style="padding:8px 16px;font-weight:600;font-size:0.85rem;border-bottom:1px solid var(--border);">源码文件</div>
+    <div id="fileList" style="padding:4px 0;"></div>
+  </div>
+  <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+    <div style="padding:8px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;background:var(--surface);">
+      <span id="codePath" style="font-family:monospace;font-size:0.8rem;color:var(--text-light);">选择文件</span>
+      <div style="flex:1;"></div>
+      <button class="btn" id="btnEditCode" onclick="editCode()" style="display:none;font-size:0.8rem;">编辑</button>
+      <button class="btn" id="btnCancelCode" onclick="cancelEdit()" style="display:none;font-size:0.8rem;">取消</button>
+      <button class="btn btn-primary" id="btnSaveCode" onclick="saveCode()" style="display:none;font-size:0.8rem;">保存</button>
+      <span id="codeStatus" style="font-size:0.75rem;color:var(--text-light);"></span>
+    </div>
+    <div style="flex:1;overflow:auto;background:#1e1e2e;position:relative;">
+      <pre id="codeContent" style="margin:0;padding:16px;font-family:'SF Mono','Fira Code',monospace;font-size:0.8rem;line-height:1.6;color:#cdd6f4;white-space:pre-wrap;word-break:break-all;"></pre>
+      <textarea id="codeEditor" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;padding:16px;font-family:'SF Mono','Fira Code',monospace;font-size:0.8rem;line-height:1.6;background:#1e1e2e;color:#cdd6f4;border:none;outline:none;resize:none;" spellcheck="false"></textarea>
+    </div>
+  </div>
+</div>
+
 </div>
 
 <script>
@@ -1061,6 +1110,231 @@ edges.push({ source: 'node-1', target: 'node-2' });
 edges.push({ source: 'node-2', target: 'node-3' });
 edges.push({ source: 'node-3', target: 'node-4' });
 renderCanvas();
+
+// ════════════════════════════════════════════════════════════
+//  Tab 切换
+// ════════════════════════════════════════════════════════════
+function switchTab(tab) {
+  const flow = document.getElementById('flowPanel');
+  const chat = document.getElementById('chatPanel');
+  const code = document.getElementById('codePanel');
+  ['tabFlow','tabChat','tabCode'].forEach(t => document.getElementById(t)?.classList.remove('active'));
+  [flow, chat, code].forEach(p => { if(p) p.style.display = 'none'; });
+  if (tab === 'flow') { flow.style.display = 'flex'; document.getElementById('tabFlow').classList.add('active'); }
+  else if (tab === 'chat') { chat.style.display = 'flex'; document.getElementById('tabChat').classList.add('active'); }
+  else if (tab === 'code') { code.style.display = 'flex'; document.getElementById('tabCode').classList.add('active'); if (!codeLoaded) loadFileList(); }
+}
+
+// ════════════════════════════════════════════════════════════
+//  AI 对话
+// ════════════════════════════════════════════════════════════
+let chatHistory = [];
+
+async function sendChat() {
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if (!text) return;
+
+  const includeCode = document.getElementById('chatIncludeCode').checked;
+  const includeResults = document.getElementById('chatIncludeResults').checked;
+
+  // 显示用户消息
+  appendChatMsg('user', text);
+  chatHistory.push({ role: 'user', content: text });
+  input.value = '';
+  input.style.height = 'auto';
+
+  // 获取 LLM 配置
+  const cfg = getLLMConfig();
+  if (!cfg.provider) {
+    appendChatMsg('assistant', '请先在流程编辑器中配置 LLM（拖入 LLM 配置节点）');
+    return;
+  }
+
+  // 创建 AI 消息占位
+  const aiEl = appendChatMsg('assistant', '');
+  let aiText = '';
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: chatHistory,
+        provider: cfg.provider,
+        api_key: cfg.api_key,
+        base_url: cfg.base_url,
+        model: cfg.model,
+        include_code: includeCode,
+        include_results: includeResults,
+      }),
+    });
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = JSON.parse(line.slice(6));
+        if (data.type === 'chunk') { aiText += data.content; aiEl.querySelector('.chat-text').textContent = aiText; }
+        else if (data.type === 'done') { break; }
+        else if (data.type === 'error') { aiEl.querySelector('.chat-text').textContent = '❌ ' + data.message; return; }
+      }
+    }
+    chatHistory.push({ role: 'assistant', content: aiText });
+  } catch (e) {
+    aiEl.querySelector('.chat-text').textContent = '❌ 请求失败: ' + e.message;
+  }
+}
+
+function appendChatMsg(role, text) {
+  const container = document.getElementById('chatMessages');
+  if (container.children.length === 1 && container.children[0].style.textAlign === 'center') {
+    container.innerHTML = '';
+  }
+  const el = document.createElement('div');
+  el.className = `chat-msg ${role}`;
+  const avatar = role === 'user' ? '🧑' : '🤖';
+  el.innerHTML = `<div class="chat-avatar">${avatar}</div><div class="chat-text">${escapeHTML(text)}</div>`;
+  container.appendChild(el);
+  container.scrollTop = container.scrollHeight;
+  return el;
+}
+
+function sendSuggestion(text) {
+  document.getElementById('chatInput').value = text;
+  sendChat();
+}
+
+function onChatKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+function getLLMConfig() {
+  // 从 LLM 配置节点读取
+  const llmNode = nodes.find(n => n.type === 'llm_config');
+  if (llmNode && llmNode.config) {
+    return {
+      provider: llmNode.config.provider || '',
+      api_key: llmNode.config.api_key || '',
+      base_url: llmNode.config.base_url || '',
+      model: llmNode.config.model || '',
+    };
+  }
+  // 回退：从环境变量 API 获取
+  return { provider: '', api_key: '', base_url: '', model: '' };
+}
+
+// ════════════════════════════════════════════════════════════
+//  代码面板
+// ════════════════════════════════════════════════════════════
+let codeLoaded = false;
+let currentCodePath = '';
+let originalCode = '';
+
+async function loadFileList() {
+  const res = await fetch('/api/code');
+  const data = await res.json();
+  const list = document.getElementById('fileList');
+  list.innerHTML = '';
+  const groups = {};
+  data.files.forEach(f => {
+    const dir = f.path.includes('/') ? f.path.split('/')[0] : '.';
+    if (!groups[dir]) groups[dir] = [];
+    groups[dir].push(f);
+  });
+  for (const [dir, files] of Object.entries(groups)) {
+    const header = document.createElement('div');
+    header.style.cssText = 'padding:6px 16px;font-size:0.7rem;color:var(--text-light);font-weight:600;text-transform:uppercase;';
+    header.textContent = dir + '/';
+    list.appendChild(header);
+    files.forEach(f => {
+      const item = document.createElement('div');
+      item.style.cssText = 'padding:4px 16px 4px 24px;font-size:0.8rem;cursor:pointer;color:var(--text);';
+      item.textContent = f.path.split('/').pop();
+      item.onmouseover = () => item.style.background = 'var(--bg)';
+      item.onmouseout = () => item.style.background = '';
+      item.onclick = () => loadCode(f.path);
+      list.appendChild(item);
+    });
+  }
+  codeLoaded = true;
+}
+
+async function loadCode(path) {
+  currentCodePath = path;
+  document.getElementById('codePath').textContent = path;
+  document.getElementById('codeStatus').textContent = '加载中...';
+  const res = await fetch(`/api/code/${path}`);
+  const data = await res.json();
+  if (data.status !== 'success') { document.getElementById('codeStatus').textContent = '加载失败'; return; }
+  originalCode = data.content;
+  document.getElementById('codeContent').textContent = data.content;
+  document.getElementById('codeContent').style.display = 'block';
+  document.getElementById('codeEditor').style.display = 'none';
+  document.getElementById('btnEditCode').style.display = 'inline-block';
+  document.getElementById('btnCancelCode').style.display = 'none';
+  document.getElementById('btnSaveCode').style.display = 'none';
+  document.getElementById('codeStatus').textContent = `${data.lines} 行 · ${data.size} 字符`;
+}
+
+function editCode() {
+  const editor = document.getElementById('codeEditor');
+  editor.value = originalCode;
+  document.getElementById('codeContent').style.display = 'none';
+  editor.style.display = 'block';
+  editor.focus();
+  document.getElementById('btnEditCode').style.display = 'none';
+  document.getElementById('btnCancelCode').style.display = 'inline-block';
+  document.getElementById('btnSaveCode').style.display = 'inline-block';
+  document.getElementById('codeStatus').textContent = '编辑中...';
+}
+
+function cancelEdit() {
+  document.getElementById('codeContent').style.display = 'block';
+  document.getElementById('codeEditor').style.display = 'none';
+  document.getElementById('btnEditCode').style.display = 'inline-block';
+  document.getElementById('btnCancelCode').style.display = 'none';
+  document.getElementById('btnSaveCode').style.display = 'none';
+  document.getElementById('codeStatus').textContent = '已取消';
+}
+
+async function saveCode() {
+  const editor = document.getElementById('codeEditor');
+  const content = editor.value;
+  if (content === originalCode) { document.getElementById('codeStatus').textContent = '无修改'; return; }
+  document.getElementById('codeStatus').textContent = '保存中...';
+  const res = await fetch(`/api/code/${currentCodePath}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+  const data = await res.json();
+  if (data.status === 'success') {
+    originalCode = content;
+    document.getElementById('codeContent').textContent = content;
+    document.getElementById('codeContent').style.display = 'block';
+    editor.style.display = 'none';
+    document.getElementById('btnEditCode').style.display = 'inline-block';
+    document.getElementById('btnCancelCode').style.display = 'none';
+    document.getElementById('btnSaveCode').style.display = 'none';
+    document.getElementById('codeStatus').textContent = `✅ ${data.message}`;
+  } else {
+    document.getElementById('codeStatus').textContent = `❌ ${data.message}`;
+  }
+}
 </script>
 
 </body>
