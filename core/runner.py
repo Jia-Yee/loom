@@ -186,7 +186,7 @@ def run(
             "type": "llm_analysis",
             "label": "训练前 LLM 分析",
             "status": "success",
-            "position": {"x": 250, "y": 0},
+            "position": {"x": 125, "y": 0},
             "display": {
                 "stage": "pre_train",
                 "model_name": None,
@@ -205,7 +205,7 @@ def run(
             "type": "llm_analysis",
             "label": "训练前 LLM 分析",
             "status": "skipped",
-            "position": {"x": 250, "y": 0},
+            "position": {"x": 125, "y": 0},
             "display": {
                 "stage": "pre_train",
                 "model_name": None,
@@ -218,13 +218,27 @@ def run(
         _emit("llm_pre", "skipped", f"训练前 LLM 分析跳过（{reason}）")
         print(f"\n[LLM 训练前分析] 跳过（{reason}）")
 
-    # ── 划分数据 ──────────────────────────────────────────
+    # ── 划分数据（作为独立节点）────────────────────────────
+    split_node_id = "split"
     _emit("split", "running", f"划分训练/测试集 (test_size={test_size}, seed={seed})...")
     stratify = y if task_type == "classification" else None
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=test_size, random_state=seed, stratify=stratify
     )
-    _emit("split", "success", f"训练集 {X_train.shape[0]} 样本，测试集 {X_test.shape[0]} 样本")
+    n_train, n_test = X_train.shape[0], X_test.shape[0]
+    _emit("split", "success", f"训练集 {n_train} 样本，测试集 {n_test} 样本")
+
+    nodes.append({
+        "id": split_node_id, "type": "split",
+        "label": "数据切分", "status": "success",
+        "position": {"x": 250, "y": 0},
+        "display": {
+            "test_size": test_size, "seed": seed,
+            "n_train": n_train, "n_test": n_test,
+            "stratified": stratify is not None,
+        },
+    })
+    edges.append({"source": llm_pre_id, "target": split_node_id})
 
     # ── 逐模型训练评估 ────────────────────────────────────
     metrics: dict[str, dict[str, float]] = {}
@@ -308,8 +322,45 @@ def run(
             "position": {"x": 500, "y": y_offset},
             "display": model_display,
         })
-        edges.append({"source": llm_pre_id, "target": model_node_id})
+        edges.append({"source": split_node_id, "target": model_node_id})
 
+        # 超参搜索节点（仅 search=True 时生成）
+        search_node_id = f"search-{model_name}"
+        if search and search_info.get("enabled"):
+            nodes.append({
+                "id": search_node_id, "type": "search",
+                "label": f"超参搜索: {model_name}", "status": "success",
+                "position": {"x": 625, "y": y_offset},
+                "display": {
+                    "model_name": model_name,
+                    "n_iter": search_info["n_iter"],
+                    "cv": search_info["cv"],
+                    "best_score": search_info["best_score"],
+                    "param_space": model.param_space(),
+                },
+            })
+            edges.append({"source": model_node_id, "target": search_node_id})
+            edges.append({"source": search_node_id, "target": metric_node_id})
+        elif search:
+            # 搜索开启但该模型跳过了（param_space 为空）
+            search_node_id = f"search-{model_name}"
+            nodes.append({
+                "id": search_node_id, "type": "search",
+                "label": f"超参搜索: {model_name}", "status": "skipped",
+                "position": {"x": 625, "y": y_offset},
+                "display": {
+                    "model_name": model_name,
+                    "n_iter": n_iter, "cv": cv,
+                    "best_score": None,
+                    "note": search_info.get("note", "跳过"),
+                },
+            })
+            edges.append({"source": model_node_id, "target": search_node_id})
+            edges.append({"source": search_node_id, "target": metric_node_id})
+        else:
+            edges.append({"source": model_node_id, "target": metric_node_id})
+
+        # metric 节点
         metric_display = {"model_name": model_name}
         metric_display.update(model_metrics)
         nodes.append({
@@ -318,7 +369,6 @@ def run(
             "position": {"x": 750, "y": y_offset},
             "display": metric_display,
         })
-        edges.append({"source": model_node_id, "target": metric_node_id})
 
         model_results.append({
             "model_name": model_name, "metrics": model_metrics,

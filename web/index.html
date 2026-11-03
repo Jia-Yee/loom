@@ -510,7 +510,14 @@ function renderCanvas() {
         body = (d.models||[]).map(m => `${m.model_name}: ${m.is_best ? '⭐' : ''} r2=${(m.r2||0).toFixed(4)}`).join('<br>');
         break;
       case 'config':
-        body = Object.entries(d).map(([k,v]) => `${k}: ${v}`).join('<br>');
+        body = Object.entries(d).filter(([k,v]) => v !== null && v !== undefined).map(([k,v]) => `${k}: ${v}`).join('<br>');
+        break;
+      case 'split':
+        body = `<div>训练: ${d.n_train} | 测试: ${d.n_test}</div><div style="font-size:0.7rem;margin-top:2px;">test_size=${d.test_size}, seed=${d.seed}${d.stratified ? ', 分层' : ''}</div>`;
+        break;
+      case 'search':
+        if (node.status === 'skipped') body = `<i>${d.note || '跳过'}</i>`;
+        else body = `<div>best_score: ${d.best_score ? d.best_score.toFixed(4) : 'N/A'}</div><div style="font-size:0.7rem;margin-top:2px;">n_iter=${d.n_iter}, cv=${d.cv}</div>`;
         break;
     }
     el.innerHTML = `<div class="node-title">${node.label}</div><div class="node-body">${body}</div>`;
