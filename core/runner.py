@@ -199,7 +199,7 @@ def run(
         _emit("llm_pre", "success", "训练前 LLM 分析完成")
         _print_llm("训练前分析", llm_pre_result)
     else:
-        reason = "未配置 LLM" if not llm.available else "调用失败"
+        reason = "未配置 LLM" if not llm.available else f"调用失败（{llm.last_error}）"
         nodes.append({
             "id": llm_pre_id,
             "type": "llm_analysis",
@@ -391,7 +391,7 @@ def run(
             _emit("llm_post", "success", f"结果解读 {model_name} 完成", model_name=model_name)
             _print_llm(f"结果解读 [{model_name}]", llm_post_result)
         else:
-            reason = "未配置 LLM" if not llm.available else "调用失败"
+            reason = "未配置 LLM" if not llm.available else f"调用失败（{llm.last_error}）"
             nodes.append({
                 "id": llm_post_id, "type": "llm_analysis",
                 "label": f"结果解读: {model_name}", "status": "skipped",

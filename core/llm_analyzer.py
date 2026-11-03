@@ -38,9 +38,10 @@ class LLMAnalyzer:
             "AUTOML_LLM_MODEL",
             _PROVIDER_DEFAULTS.get(self.provider, {}).get("model", ""),
         ).strip()
-        self.timeout = int(os.environ.get("AUTOML_LLM_TIMEOUT", "30"))
+        self.timeout = int(os.environ.get("AUTOML_LLM_TIMEOUT", "120"))
 
         self._client: Optional[OpenAI] = None
+        self.last_error: str = ""
         if self.provider and self.base_url and self.model:
             # Ollama 不需要真实 key，但 SDK 要求非空
             key = self.api_key or ("ollama-placeholder" if self.provider == "ollama" else "")
@@ -81,7 +82,7 @@ class LLMAnalyzer:
             content = resp.choices[0].message.content.strip()
             return self._parse(content)
         except Exception as e:
-            print(f"  [LLM] 调用失败: {e}")
+            self.last_error = f"{type(e).__name__}: {e}"
             return None
 
     @staticmethod
