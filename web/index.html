@@ -90,6 +90,7 @@
   }
 
   /* ── 中间：画布 ─────────────────────── */
+  .canvas-container.drag-over { background: var(--surface2); border-color: var(--accent); }
   .canvas-container {
     flex: 1; position: relative; overflow: hidden; background: var(--bg);
     background-image: radial-gradient(circle, var(--border) 1px, transparent 1px);
@@ -535,9 +536,11 @@ function filterNodes(val) { renderNodeLibrary(val); }
 // ════════════════════════════════════════════════════════════
 const canvas = document.getElementById('canvas');
 
-canvas.ondragover = (e) => { e.preventDefault(); };
+canvas.ondragover = (e) => { e.preventDefault(); canvas.classList.add('drag-over'); };
+canvas.ondragleave = (e) => { if (e.target === canvas) canvas.classList.remove('drag-over'); };
 canvas.ondrop = (e) => {
   e.preventDefault();
+  canvas.classList.remove('drag-over');
   const type = e.dataTransfer.getData('node-type');
   if (!type || !NODE_TYPES[type]) return;
   const rect = canvas.getBoundingClientRect();
@@ -1104,15 +1107,7 @@ canvas.onclick = (e) => {
 // ════════════════════════════════════════════════════════════
 renderNodeLibrary();
 
-// 默认添加一组节点
-addNode('dataset', 40, 40);
-addNode('split', 300, 40);
-addNode('model', 560, 40);
-addNode('metric', 820, 40);
-// 自动连线
-edges.push({ source: 'node-1', target: 'node-2' });
-edges.push({ source: 'node-2', target: 'node-3' });
-edges.push({ source: 'node-3', target: 'node-4' });
+// 空画布，用户从左栏拖拽节点
 renderCanvas();
 
 // ════════════════════════════════════════════════════════════
