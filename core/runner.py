@@ -125,7 +125,11 @@ def run(
         raise ValueError(f"模型列表包含混合任务类型: {model_task_types}")
 
     # ── LLM 初始化 ────────────────────────────────────────
-    llm = LLMAnalyzer()
+    # LLM 日志通过 on_step 推送到前端
+    def _llm_log(msg: str):
+        _emit("llm_log", "running", msg)
+
+    llm = LLMAnalyzer(on_log=_llm_log)
     if llm.available:
         _emit("llm_init", "success", f"LLM 就绪：provider={llm.provider}, model={llm.model}")
     else:

@@ -151,9 +151,9 @@ def api_run_stream():
 
         while True:
             try:
-                kind, data = q.get(timeout=300)
+                kind, data = q.get(timeout=600)
             except queue.Empty:
-                yield f"data: {json.dumps({'type': 'error', 'message': '超时（5分钟无响应）'})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': '超时（10分钟无响应）'})}\n\n"
                 break
 
             if kind == "step":
