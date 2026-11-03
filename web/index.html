@@ -243,6 +243,7 @@
   <div class="spacer"></div>
   <div class="status-dot" id="statusDot"></div>
   <span id="statusText" style="font-size:0.8rem;color:var(--text-light);">就绪</span>
+  <button class="btn" onclick="showLLMSettings()">⚙ LLM</button>
   <button class="btn" onclick="clearCanvas()">清空</button>
   <button class="btn" onclick="showHistory()">历史</button>
   <button class="btn btn-primary" id="btnRun" onclick="runFlow()">▶ 运行</button>
@@ -297,6 +298,46 @@
   </div>
   <div class="log-content" id="logPanel">
     <div class="log-line">Loom 流程编辑器已就绪。</div>
+  </div>
+</div>
+
+<!-- LLM 设置弹窗 -->
+<div id="llmModal" class="modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
+  <div style="background:var(--surface);border-radius:12px;padding:24px;width:460px;max-width:90vw;">
+    <div style="font-size:1.1rem;font-weight:600;margin-bottom:16px;">⚙ LLM 全局配置</div>
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      <div>
+        <label style="font-size:0.8rem;color:var(--text-light);">Provider</label>
+        <select id="llmProviderGlobal" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-top:4px;">
+          <option value="">未配置（跳过 LLM）</option>
+          <option value="ollama">Ollama（本地）</option>
+          <option value="deepseek">DeepSeek</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:0.8rem;color:var(--text-light);">API Key</label>
+        <input id="llmApiKeyGlobal" type="password" placeholder="DeepSeek 需要；Ollama 填占位符" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-top:4px;">
+      </div>
+      <div>
+        <label style="font-size:0.8rem;color:var(--text-light);">Base URL（留空用默认）</label>
+        <input id="llmBaseUrlGlobal" type="text" placeholder="自动" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-top:4px;">
+      </div>
+      <div>
+        <label style="font-size:0.8rem;color:var(--text-light);">模型名</label>
+        <input id="llmModelGlobal" type="text" placeholder="如 qwen3.5:4b 或 deepseek-chat" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-top:4px;">
+      </div>
+      <div>
+        <label style="font-size:0.8rem;color:var(--text-light);">超时（秒）</label>
+        <input id="llmTimeoutGlobal" type="number" value="120" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-top:4px;">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px;">
+      <button class="btn" onclick="testLLMGlobal()" id="btnTestLLM">测试连接</button>
+      <div style="flex:1;"></div>
+      <button class="btn" onclick="closeLLMSettings()">取消</button>
+      <button class="btn btn-primary" onclick="saveLLMSettings()">保存</button>
+    </div>
+    <div id="llmTestResult" style="margin-top:12px;font-size:0.85rem;"></div>
   </div>
 </div>
 
@@ -949,12 +990,14 @@ async function runFlow() {
     cv: searchNode ? (parseInt(searchNode.config.cv) || 5) : 5,
   };
 
-  if (llmConfigNode) {
-    body.llm_provider = llmConfigNode.config.provider || '';
-    body.llm_api_key = llmConfigNode.config.api_key || '';
-    body.llm_base_url = llmConfigNode.config.base_url || '';
-    body.llm_model = llmConfigNode.config.model || '';
-    body.llm_timeout = llmConfigNode.config.timeout || 120;
+  // LLM 配置：从全局配置读取（localStorage）
+  const llmCfg = getLLMConfig();
+  if (llmCfg.provider) {
+    body.llm_provider = llmCfg.provider;
+    body.llm_api_key = llmCfg.api_key;
+    body.llm_base_url = llmCfg.base_url;
+    body.llm_model = llmCfg.model;
+    body.llm_timeout = llmCfg.timeout;
   }
 
   if (datasetNode.type === 'csv_upload' && datasetNode.config.filepath) {
@@ -967,7 +1010,7 @@ async function runFlow() {
   }
 
   addLog(`启动流水线: 模型=${modelNames}, 数据集=${body.dataset_name}`);
-  if (llmConfigNode && body.llm_provider) addLog(`LLM: ${body.llm_provider}/${body.llm_model}`);
+  if (llmCfg.provider) addLog(`LLM: ${llmCfg.provider}/${llmCfg.model}`);
   if (splitNode) addLog(`切分: test_size=${body.test_size}, seed=${body.seed}`);
   if (searchNode) addLog(`搜索: n_iter=${body.n_iter}, cv=${body.cv}`);
   setStatus('running', '运行中...');
@@ -1155,6 +1198,7 @@ renderNodeLibrary();
 
 // 空画布，用户从左栏拖拽节点
 renderCanvas();
+updateLLMBadge();
 
 // ════════════════════════════════════════════════════════════
 //  Tab 切换
@@ -1267,19 +1311,85 @@ function autoResize(el) {
   el.style.height = Math.min(el.scrollHeight, 120) + 'px';
 }
 
+// ════════════════════════════════════════════════════════════
+//  全局 LLM 配置（localStorage 持久化）
+// ════════════════════════════════════════════════════════════
 function getLLMConfig() {
-  // 从 LLM 配置节点读取
-  const llmNode = nodes.find(n => n.type === 'llm_config');
-  if (llmNode && llmNode.config) {
-    return {
-      provider: llmNode.config.provider || '',
-      api_key: llmNode.config.api_key || '',
-      base_url: llmNode.config.base_url || '',
-      model: llmNode.config.model || '',
-    };
+  try {
+    const saved = localStorage.getItem('loom_llm_config');
+    if (saved) return JSON.parse(saved);
+  } catch(e) {}
+  return { provider: '', api_key: '', base_url: '', model: '', timeout: 120 };
+}
+
+function saveLLMSettings() {
+  const cfg = {
+    provider: document.getElementById('llmProviderGlobal').value,
+    api_key: document.getElementById('llmApiKeyGlobal').value,
+    base_url: document.getElementById('llmBaseUrlGlobal').value,
+    model: document.getElementById('llmModelGlobal').value,
+    timeout: parseInt(document.getElementById('llmTimeoutGlobal').value) || 120,
+  };
+  localStorage.setItem('loom_llm_config', JSON.stringify(cfg));
+  closeLLMSettings();
+  addLog(`LLM 配置已保存: ${cfg.provider || '未配置'}/${cfg.model || '默认'}`, 'success');
+  // 更新顶栏状态
+  updateLLMBadge();
+}
+
+function showLLMSettings() {
+  const cfg = getLLMConfig();
+  document.getElementById('llmProviderGlobal').value = cfg.provider || '';
+  document.getElementById('llmApiKeyGlobal').value = cfg.api_key || '';
+  document.getElementById('llmBaseUrlGlobal').value = cfg.base_url || '';
+  document.getElementById('llmModelGlobal').value = cfg.model || '';
+  document.getElementById('llmTimeoutGlobal').value = cfg.timeout || 120;
+  document.getElementById('llmTestResult').innerHTML = '';
+  document.getElementById('llmModal').style.display = 'flex';
+}
+
+function closeLLMSettings() {
+  document.getElementById('llmModal').style.display = 'none';
+}
+
+async function testLLMGlobal() {
+  const cfg = {
+    provider: document.getElementById('llmProviderGlobal').value,
+    api_key: document.getElementById('llmApiKeyGlobal').value,
+    base_url: document.getElementById('llmBaseUrlGlobal').value,
+    model: document.getElementById('llmModelGlobal').value,
+    timeout: parseInt(document.getElementById('llmTimeoutGlobal').value) || 120,
+  };
+  const result = document.getElementById('llmTestResult');
+  result.innerHTML = '<span style="color:var(--text-light);">测试中...</span>';
+  document.getElementById('btnTestLLM').disabled = true;
+  try {
+    const res = await fetch('/api/llm_test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg),
+    });
+    const data = await res.json();
+    if (data.status === 'success') {
+      result.innerHTML = `<span style="color:var(--success);">✅ ${data.message}</span>`;
+    } else {
+      result.innerHTML = `<span style="color:var(--danger);">❌ ${data.message}</span>`;
+    }
+  } catch(e) {
+    result.innerHTML = `<span style="color:var(--danger);">❌ 请求失败: ${e.message}</span>`;
   }
-  // 回退：从环境变量 API 获取
-  return { provider: '', api_key: '', base_url: '', model: '' };
+  document.getElementById('btnTestLLM').disabled = false;
+}
+
+function updateLLMBadge() {
+  const cfg = getLLMConfig();
+  const dot = document.getElementById('statusDot');
+  const text = document.getElementById('statusText');
+  if (cfg.provider) {
+    text.textContent = `LLM: ${cfg.model || cfg.provider}`;
+  } else {
+    text.textContent = '就绪';
+  }
 }
 
 // ════════════════════════════════════════════════════════════
