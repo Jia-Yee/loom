@@ -3,372 +3,789 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Loom — AutoML 控制台</title>
+<title>Loom — AutoML 流程编辑器</title>
 <style>
   :root {
-    --bg: #f0f0f5; --surface: #fff; --text: #1d1d1f; --text-light: #86868b;
-    --border: #d2d2d7; --accent: #4a7c59; --accent-hover: #3a6349;
+    --bg: #1a1a2e; --surface: #16213e; --surface2: #0f3460; --surface3: #1a1a3e;
+    --text: #e0e0e0; --text-light: #8888aa; --border: #2a2a4a;
+    --accent: #4a7c59; --accent-light: #2a5a3a; --accent-glow: #4a7c5955;
     --danger: #ff3b30; --success: #34c759; --warning: #ff9500; --info: #007aff;
-    --radius: 10px; --shadow: 0 2px 8px rgba(0,0,0,0.06);
-    --chat-user: #007aff; --chat-ai: #4a7c59;
+    --node-w: 200px; --port-size: 10px;
+    --cat-data: #4a6fa5; --cat-process: #d97b2c; --cat-model: #4a7c59;
+    --cat-eval: #8b5cf6; --cat-llm: #c4536a; --cat-output: #6b7280;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
     background: var(--bg); color: var(--text); height: 100vh;
     display: flex; flex-direction: column; overflow: hidden;
+    -webkit-font-smoothing: antialiased;
   }
-  .topbar {
-    height: 48px; background: var(--surface); border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; padding: 0 20px; gap: 16px; flex-shrink: 0;
-  }
-  .topbar h1 { font-size: 1.05rem; font-weight: 600; }
-  .topbar .spacer { flex: 1; }
-  .tab-switch { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-  .tab-switch button {
-    padding: 6px 16px; border: none; background: var(--surface); cursor: pointer;
-    font-size: 0.85rem; transition: all 0.15s;
-  }
-  .tab-switch button.active { background: var(--accent); color: white; }
-  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-light); }
-  .status-dot.running { background: var(--info); animation: pulse 1s infinite; }
-  .status-dot.success { background: var(--success); }
-  .status-dot.error { background: var(--danger); }
-  @keyframes pulse { 50% { opacity: 0.3; } }
-  .layout { display: flex; flex: 1; overflow: hidden; }
-  .sidebar {
-    width: 320px; background: var(--surface); border-right: 1px solid var(--border);
-    overflow-y: auto; flex-shrink: 0; padding: 16px;
-  }
-  .sidebar h3 { font-size: 0.8rem; color: var(--text-light); text-transform: uppercase; margin: 16px 0 8px; letter-spacing: 0.5px; }
-  .sidebar h3:first-child { margin-top: 0; }
-  .sidebar label { display: block; font-size: 0.8rem; margin: 8px 0 4px; color: var(--text-light); }
-  .sidebar select, .sidebar input[type="number"], .sidebar input[type="text"], .sidebar input[type="password"] {
-    width: 100%; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.85rem;
-  }
-  .sidebar .checkbox-row { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
-  .sidebar .checkbox-row label { margin: 0; }
-  .sidebar .model-list { display: flex; flex-direction: column; gap: 4px; }
-  .sidebar .model-item { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
-  .sidebar .model-item:hover { background: var(--bg); }
-  .sidebar .model-item input { margin: 0; }
-  .btn-run {
-    width: 100%; padding: 10px; background: var(--accent); color: white; border: none;
-    border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer; margin-top: 12px;
-  }
-  .btn-run:hover { background: var(--accent-hover); }
-  .btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
-  .btn-secondary {
-    padding: 6px 12px; background: var(--surface); border: 1px solid var(--border);
-    border-radius: 6px; font-size: 0.8rem; cursor: pointer;
-  }
-  .btn-secondary:hover { background: var(--bg); }
-  .btn-test {
-    padding: 6px 12px; background: var(--info); color: white; border: none;
-    border-radius: 6px; font-size: 0.8rem; cursor: pointer; margin-top: 4px;
-  }
-  .btn-test:hover { opacity: 0.85; }
-  .content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-  .canvas-area { flex: 1; position: relative; overflow: auto; background: var(--bg); }
-  .canvas-toolbar { padding: 8px 16px; display: flex; gap: 8px; border-bottom: 1px solid var(--border); background: var(--surface); }
-  .canvas-toolbar button { padding: 4px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); cursor: pointer; font-size: 0.8rem; }
-  .canvas-toolbar button:hover { background: var(--bg); }
-  .canvas-inner { position: relative; width: 100%; min-height: 100%; }
-  .node {
-    position: absolute; width: 200px; background: var(--surface); border: 2px solid var(--border);
-    border-radius: 8px; padding: 10px; box-shadow: var(--shadow); cursor: move; user-select: none;
-  }
-  .node.running { border-color: var(--info); animation: pulse 1s infinite; }
-  .node.success { border-color: var(--success); }
-  .node.failed { border-color: var(--danger); }
-  .node.skipped { border-color: var(--text-light); border-style: dashed; opacity: 0.6; }
-  .node-title { font-size: 0.8rem; font-weight: 600; margin-bottom: 4px; }
-  .node-body { font-size: 0.75rem; color: var(--text-light); }
-  .node-body code { background: var(--bg); padding: 1px 4px; border-radius: 3px; font-size: 0.7rem; }
-  .edge-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
-  .log-panel { height: 180px; border-top: 1px solid var(--border); background: #1e1e1e; color: #ddd; padding: 8px 16px; overflow-y: auto; font-family: "SF Mono", Menlo, monospace; font-size: 0.78rem; }
-  .log-line { margin: 2px 0; }
-  .log-line.error { color: #ff6b6b; }
-  .log-line.success { color: #51cf66; }
-  .log-line.warning { color: #ffd43b; }
-  .empty-state { text-align: center; padding: 80px 20px; color: var(--text-light); }
-  .empty-state .icon { font-size: 3rem; margin-bottom: 12px; }
 
-  /* Chat 面板 */
-  .chat-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-  .chat-messages { flex: 1; overflow-y: auto; padding: 16px; }
-  .chat-msg { margin-bottom: 12px; max-width: 80%; }
-  .chat-msg.user { margin-left: auto; }
-  .chat-msg .bubble {
-    padding: 10px 14px; border-radius: 12px; font-size: 0.88rem; line-height: 1.6;
-    white-space: pre-wrap; word-break: break-word;
+  /* ── 顶栏 ──────────────────────────── */
+  .topbar {
+    height: 44px; background: var(--surface); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 16px; gap: 12px; flex-shrink: 0;
   }
-  .chat-msg.user .bubble { background: var(--chat-user); color: white; }
-  .chat-msg.ai .bubble { background: var(--surface); border: 1px solid var(--border); }
-  .chat-msg.ai .bubble pre { background: #f6f3ee; padding: 8px; border-radius: 6px; overflow-x: auto; margin: 6px 0; }
-  .chat-msg.ai .bubble code { background: #f6f3ee; padding: 1px 4px; border-radius: 3px; font-size: 0.82rem; }
-  .chat-msg.ai .bubble pre code { background: none; padding: 0; }
-  .chat-input-area { border-top: 1px solid var(--border); padding: 12px 16px; background: var(--surface); }
-  .chat-input-row { display: flex; gap: 8px; align-items: flex-end; }
-  .chat-input-row textarea {
-    flex: 1; resize: none; border: 1px solid var(--border); border-radius: 8px;
-    padding: 8px 12px; font-size: 0.88rem; font-family: inherit; min-height: 40px; max-height: 120px;
+  .topbar .logo { font-size: 1rem; font-weight: 700; color: var(--accent); }
+  .topbar .tab-switch { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .topbar .tab-switch button {
+    padding: 4px 12px; border: none; background: transparent; color: var(--text-light);
+    cursor: pointer; font-size: 0.8rem; transition: all 0.15s;
   }
-  .chat-input-row button {
-    padding: 8px 16px; background: var(--accent); color: white; border: none;
-    border-radius: 8px; cursor: pointer; font-size: 0.85rem; white-space: nowrap;
+  .topbar .tab-switch button.active { background: var(--accent); color: #fff; }
+  .topbar .spacer { flex: 1; }
+  .topbar .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-light); }
+  .topbar .status-dot.running { background: var(--info); animation: pulse 1s infinite; }
+  .topbar .status-dot.success { background: var(--success); }
+  .topbar .status-dot.error { background: var(--danger); }
+  @keyframes pulse { 50% { opacity: 0.3; } }
+  .topbar button.btn {
+    padding: 4px 12px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface2); color: var(--text); cursor: pointer; font-size: 0.8rem;
   }
-  .chat-input-row button:disabled { opacity: 0.5; }
-  .chat-context { display: flex; gap: 12px; margin-bottom: 8px; font-size: 0.78rem; color: var(--text-light); }
-  .chat-context label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
-  .chat-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
-  .chat-suggestions button {
-    padding: 4px 10px; border: 1px solid var(--border); border-radius: 12px;
-    background: var(--surface); cursor: pointer; font-size: 0.78rem; color: var(--text-light);
+  .topbar button.btn:hover { background: var(--surface3); }
+  .topbar button.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .topbar button.btn-primary:hover { background: var(--accent-light); }
+
+  /* ── 主布局 ─────────────────────────── */
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  /* ── 左栏：节点库 ───────────────────── */
+  .sidebar-left {
+    width: 220px; background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden;
   }
-  .chat-suggestions button:hover { background: var(--bg); color: var(--text); }
-  .llm-test-result { font-size: 0.78rem; margin-top: 4px; padding: 4px 8px; border-radius: 4px; }
-  .llm-test-result.success { background: #e8f5e9; color: #2e7d32; }
-  .llm-test-result.error { background: #fce4ec; color: #c62828; }
-  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 200; }
-  .modal-overlay.show { display: flex; }
-  .modal { background: var(--surface); border-radius: 12px; padding: 24px; max-width: 600px; width: 90%; max-height: 70vh; overflow-y: auto; }
-  .modal h2 { margin-bottom: 16px; }
-  .modal table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-  .modal th, .modal td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); }
-  .modal .close { margin-top: 16px; text-align: right; }
+  .sidebar-left .panel-header {
+    padding: 10px 14px; font-weight: 600; font-size: 0.85rem;
+    border-bottom: 1px solid var(--border); color: var(--text);
+  }
+  .sidebar-left .search-box {
+    padding: 8px 10px; border-bottom: 1px solid var(--border);
+  }
+  .sidebar-left .search-box input {
+    width: 100%; padding: 4px 8px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 4px; color: var(--text); font-size: 0.8rem; outline: none;
+  }
+  .sidebar-left .node-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+  .node-category { margin-bottom: 2px; }
+  .node-category .cat-header {
+    padding: 6px 14px; font-size: 0.75rem; font-weight: 600; color: var(--text-light);
+    text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer;
+    display: flex; align-items: center; gap: 6px; user-select: none;
+  }
+  .node-category .cat-header:hover { color: var(--text); }
+  .node-category .cat-header .cat-icon { font-size: 0.9rem; }
+  .node-category .cat-header .cat-count { margin-left: auto; font-size: 0.7rem; opacity: 0.6; }
+  .node-category .cat-items { overflow: hidden; }
+  .node-category.collapsed .cat-items { display: none; }
+  .node-item {
+    padding: 6px 14px 6px 28px; font-size: 0.82rem; cursor: grab; color: var(--text);
+    display: flex; align-items: center; gap: 8px; transition: background 0.1s;
+  }
+  .node-item:hover { background: var(--surface2); }
+  .node-item:active { cursor: grabbing; }
+  .node-item .node-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  }
+
+  /* ── 中间：画布 ─────────────────────── */
+  .canvas-container {
+    flex: 1; position: relative; overflow: hidden; background: var(--bg);
+    background-image: radial-gradient(circle, var(--border) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+  .canvas-toolbar {
+    position: absolute; top: 8px; left: 8px; z-index: 10;
+    display: flex; gap: 6px;
+  }
+  .canvas-toolbar button {
+    padding: 4px 10px; border: 1px solid var(--border); border-radius: 4px;
+    background: var(--surface); color: var(--text); cursor: pointer; font-size: 0.75rem;
+  }
+  .canvas-toolbar button:hover { background: var(--surface2); }
+  .canvas-empty {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    text-align: center; color: var(--text-light); pointer-events: none;
+  }
+  .canvas-empty .icon { font-size: 3rem; margin-bottom: 8px; }
+
+  /* 画布节点 */
+  .canvas-node {
+    position: absolute; width: var(--node-w); background: var(--surface);
+    border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3); cursor: move; user-select: none;
+    transition: box-shadow 0.15s;
+  }
+  .canvas-node:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
+  .canvas-node.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+  .canvas-node.status-success { border-left: 3px solid var(--success); }
+  .canvas-node.status-running { border-left: 3px solid var(--info); }
+  .canvas-node.status-failed { border-left: 3px solid var(--danger); }
+  .canvas-node.status-skipped { border-left: 3px solid var(--text-light); opacity: 0.7; }
+  .canvas-node .node-title {
+    padding: 6px 10px; font-size: 0.8rem; font-weight: 600; color: #fff;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .canvas-node .node-body {
+    padding: 6px 10px; font-size: 0.72rem; color: var(--text-light); line-height: 1.5;
+  }
+  .canvas-node .node-ports {
+    display: flex; justify-content: space-between; padding: 0 6px; height: 14px;
+    align-items: center;
+  }
+  .port {
+    width: var(--port-size); height: var(--port-size); border-radius: 50%;
+    background: var(--border); border: 2px solid var(--surface); cursor: crosshair;
+    position: relative; z-index: 5;
+  }
+  .port:hover { background: var(--accent); }
+  .port.input { margin-left: -5px; }
+  .port.output { margin-right: -5px; }
+
+  /* SVG 连线层 */
+  .edge-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+  .edge-layer path { fill: none; stroke: var(--text-light); stroke-width: 2; pointer-events: stroke; cursor: pointer; }
+  .edge-layer path:hover { stroke: var(--accent); stroke-width: 3; }
+
+  /* ── 右栏：参数配置 ─────────────────── */
+  .sidebar-right {
+    width: 300px; background: var(--surface); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden;
+  }
+  .sidebar-right .panel-header {
+    padding: 10px 14px; font-weight: 600; font-size: 0.85rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-right .panel-content { flex: 1; overflow-y: auto; padding: 12px; }
+  .sidebar-right .config-empty { text-align: center; color: var(--text-light); padding: 40px 0; font-size: 0.85rem; }
+  .config-group { margin-bottom: 16px; }
+  .config-group label {
+    display: block; font-size: 0.78rem; color: var(--text-light); margin-bottom: 4px;
+  }
+  .config-group input, .config-group select {
+    width: 100%; padding: 4px 8px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 4px; color: var(--text); font-size: 0.82rem; outline: none;
+  }
+  .config-group input:focus, .config-group select:focus { border-color: var(--accent); }
+  .config-group .checkbox-row { display: flex; align-items: center; gap: 6px; }
+  .config-group .checkbox-row input { width: auto; }
+  .config-section-title {
+    font-size: 0.75rem; font-weight: 600; color: var(--text-light); text-transform: uppercase;
+    letter-spacing: 0.5px; margin: 12px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--border);
+  }
+  .code-preview {
+    margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px;
+  }
+  .code-preview .code-header {
+    font-size: 0.75rem; color: var(--text-light); margin-bottom: 6px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .code-preview .code-header button {
+    padding: 2px 8px; font-size: 0.7rem; border: 1px solid var(--border);
+    border-radius: 4px; background: var(--surface2); color: var(--text); cursor: pointer;
+  }
+  .code-preview pre {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    padding: 8px; font-size: 0.72rem; line-height: 1.5; overflow-x: auto;
+    max-height: 200px; overflow-y: auto; color: #cdd6f4;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+
+  /* ── 底栏：日志 ─────────────────────── */
+  .log-bar {
+    height: 140px; background: var(--surface); border-top: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0;
+  }
+  .log-bar .log-header {
+    padding: 6px 14px; font-size: 0.78rem; font-weight: 600; color: var(--text-light);
+    border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px;
+  }
+  .log-bar .log-header button {
+    margin-left: auto; padding: 2px 8px; font-size: 0.7rem; border: 1px solid var(--border);
+    border-radius: 4px; background: var(--surface2); color: var(--text); cursor: pointer;
+  }
+  .log-bar .log-content {
+    flex: 1; overflow-y: auto; padding: 4px 14px; font-size: 0.75rem; line-height: 1.6;
+    font-family: 'SF Mono', monospace;
+  }
+  .log-line { color: var(--text-light); }
+  .log-line.success { color: var(--success); }
+  .log-line.error { color: var(--danger); }
+  .log-line.warning { color: var(--warning); }
+
+  /* ── 拖拽预览 ─────────────────────── */
+  .drag-preview {
+    position: fixed; pointer-events: none; z-index: 9999;
+    padding: 4px 10px; background: var(--surface2); border: 1px solid var(--accent);
+    border-radius: 4px; font-size: 0.8rem; color: #fff; opacity: 0.8;
+  }
 </style>
 </head>
 <body>
 
+<!-- 顶栏 -->
 <div class="topbar">
-  <h1>🌀 Loom</h1>
+  <div class="logo">🌀 Loom</div>
   <div class="tab-switch">
-    <button id="tabConsole" class="active" onclick="switchTab('console')">控制台</button>
-    <button id="tabChat" onclick="switchTab('chat')">AI 对话</button>
-    <button id="tabCode" onclick="switchTab('code')">代码</button>
+    <button class="active">流程编辑器</button>
+    <button onclick="location.href='/api/chat'">AI 对话</button>
   </div>
   <div class="spacer"></div>
   <div class="status-dot" id="statusDot"></div>
-  <span id="statusText" style="font-size:0.85rem;color:var(--text-light);">就绪</span>
-  <button class="btn-secondary" onclick="showHistory()">历史</button>
+  <span id="statusText" style="font-size:0.8rem;color:var(--text-light);">就绪</span>
+  <button class="btn" onclick="clearCanvas()">清空</button>
+  <button class="btn" onclick="showHistory()">历史</button>
+  <button class="btn btn-primary" id="btnRun" onclick="runFlow()">▶ 运行</button>
 </div>
 
-<div class="layout">
-  <!-- 左侧配置 -->
-  <div class="sidebar">
-    <h3>数据集</h3>
-    <select id="datasetSelect" onchange="onDatasetChange()"></select>
+<!-- 主布局 -->
+<div class="main">
 
-    <h3>上传 CSV</h3>
-    <input type="file" id="csvFile" accept=".csv" onchange="uploadCSV(this)">
-    <div id="csvConfig" style="display:none;margin-top:8px;">
-      <label>目标列</label>
-      <select id="csvTargetCol"></select>
-      <label>任务类型</label>
-      <select id="csvTaskType">
-        <option value="regression">回归</option>
-        <option value="classification">分类</option>
-      </select>
-      <button class="btn-secondary" style="width:100%;margin-top:6px;" onclick="registerCSV()">注册数据集</button>
+  <!-- 左栏：节点库 -->
+  <div class="sidebar-left">
+    <div class="panel-header">节点库</div>
+    <div class="search-box">
+      <input type="text" placeholder="搜索节点..." oninput="filterNodes(this.value)">
     </div>
-
-    <h3>模型（可多选）</h3>
-    <div class="model-list" id="modelList"></div>
-
-    <h3>运行参数</h3>
-    <label>测试集比例</label>
-    <input type="number" id="testSize" value="0.2" step="0.05" min="0.05" max="0.5">
-    <label>随机种子</label>
-    <input type="number" id="seed" value="42">
-
-    <div class="checkbox-row">
-      <input type="checkbox" id="selectBest">
-      <label for="selectBest">自动选优</label>
-    </div>
-    <div class="checkbox-row">
-      <input type="checkbox" id="searchEnabled" onchange="document.getElementById('searchParams').style.display=this.checked?'block':'none'">
-      <label for="searchEnabled">超参搜索</label>
-    </div>
-    <div id="searchParams" style="display:none;">
-      <label>搜索次数</label>
-      <input type="number" id="nIter" value="10" min="1">
-      <label>交叉验证折数</label>
-      <input type="number" id="cv" value="5" min="2">
-    </div>
-    <label>LLM 解读范围</label>
-    <select id="llmPostScope">
-      <option value="all">全部模型</option>
-      <option value="best">仅最优</option>
-    </select>
-
-    <button class="btn-run" id="btnRun" onclick="runPipeline()">▶ 运行流水线</button>
-
-    <h3>LLM 配置</h3>
-    <label>Provider</label>
-    <select id="llmProvider" onchange="onLLMProviderChange()">
-      <option value="">未配置</option>
-      <option value="deepseek">DeepSeek</option>
-      <option value="ollama">Ollama (本地)</option>
-    </select>
-    <label>API Key</label>
-    <input type="password" id="llmApiKey" placeholder="DeepSeek 需要，Ollama 填占位符">
-    <label>Base URL（留空用默认）</label>
-    <input type="text" id="llmBaseUrl" placeholder="自动">
-    <label>模型名</label>
-    <input type="text" id="llmModel" placeholder="如 deepseek-chat / qwen3.5:4b">
-    <button class="btn-test" onclick="testLLM()">🔍 测试连接</button>
-    <div id="llmTestResult"></div>
+    <div class="node-list" id="nodeLibrary"></div>
   </div>
 
-  <!-- 右侧内容区 -->
-  <div class="content">
-    <!-- 控制台面板 -->
-    <div id="consolePanel" class="content" style="display:flex;">
-      <div class="canvas-area">
-        <div class="canvas-toolbar">
-          <button onclick="resetLayout()">重置布局</button>
-          <button onclick="downloadNodes()">下载 nodes.json</button>
-          <button onclick="downloadResult()">下载完整结果</button>
-        </div>
-        <div class="canvas-inner" id="canvas">
-          <div class="empty-state" id="emptyState">
-            <div class="icon">🌀</div>
-            <div>选择模型和数据集，点击「运行流水线」</div>
-          </div>
-          <svg class="edge-layer" id="edgeLayer"></svg>
-        </div>
-      </div>
-      <div class="log-panel" id="logPanel">
-        <div class="log-line">Loom 控制台已就绪。配置参数后点击「运行流水线」。</div>
-      </div>
+  <!-- 中间：画布 -->
+  <div class="canvas-container" id="canvas">
+    <div class="canvas-toolbar">
+      <button onclick="resetLayout()">重置布局</button>
+      <button onclick="autoLayout()">自动排列</button>
     </div>
+    <div class="canvas-empty" id="canvasEmpty">
+      <div class="icon">🌀</div>
+      <div>从左侧拖拽节点到画布</div>
+    </div>
+    <svg class="edge-layer" id="edgeLayer">
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#8888aa"/>
+        </marker>
+      </defs>
+    </svg>
+  </div>
 
-    <!-- Chat 面板 -->
-    <div id="chatPanel" style="display:none;flex:1;flex-direction:column;overflow:hidden;">
-      <div class="chat-messages" id="chatMessages">
-        <div class="chat-msg ai">
-          <div class="bubble">你好！我是 Loom AI 助手。可以问我关于代码、模型、数据集、运行结果的任何问题，也可以让我帮你生成训练流程代码。</div>
-        </div>
-      </div>
-      <div class="chat-input-area">
-        <div class="chat-suggestions">
-          <button onclick="sendSuggestion('当前有哪些模型和数据集？')">当前有哪些模型？</button>
-          <button onclick="sendSuggestion('解释一下 runner.py 的流程')">解释 runner.py</button>
-          <button onclick="sendSuggestion('分析最近一次运行结果')">分析运行结果</button>
-          <button onclick="sendSuggestion('帮我写一个用随机森林跑 diabetes 的代码')">生成训练代码</button>
-          <button onclick="sendSuggestion('如何添加一个新模型？')">如何扩展？</button>
-        </div>
-        <div class="chat-context">
-          <label><input type="checkbox" id="ctxCode"> 附带代码</label>
-          <label><input type="checkbox" id="ctxResults" checked> 附带结果</label>
-        </div>
-        <div class="chat-input-row">
-          <textarea id="chatInput" placeholder="输入问题..." rows="1" onkeydown="onChatKey(event)" oninput="autoResize(this)"></textarea>
-          <button id="btnSend" onclick="sendChat()">发送</button>
-        </div>
-      </div>
+  <!-- 右栏：参数配置 -->
+  <div class="sidebar-right">
+    <div class="panel-header" id="configTitle">参数配置</div>
+    <div class="panel-content" id="configPanel">
+      <div class="config-empty">点击画布上的节点查看参数</div>
     </div>
   </div>
+
 </div>
 
-<!-- 历史弹窗 -->
-<div class="modal-overlay" id="historyModal" onclick="if(event.target===this)closeHistory()">
-  <div class="modal">
-    <h2>历史运行</h2>
-    <table>
-      <thead><tr><th>Run ID</th><th>数据集</th><th>最优模型</th><th>时间</th></tr></thead>
-      <tbody id="historyBody"></tbody>
-    </table>
-    <div class="close"><button class="btn-secondary" onclick="closeHistory()">关闭</button></div>
+<!-- 底栏：日志 -->
+<div class="log-bar">
+  <div class="log-header">
+    📋 执行日志
+    <button onclick="clearLog()">清空</button>
   </div>
-</div>
-
-<!-- 代码面板 -->
-<div id="codePanel" style="display:none;flex:1;flex-direction:row;overflow:hidden;">
-  <!-- 文件树 -->
-  <div style="width:240px;border-right:1px solid var(--border);background:var(--surface);overflow-y:auto;padding:8px 0;">
-    <div style="padding:8px 16px;font-weight:600;font-size:0.9rem;border-bottom:1px solid var(--border);">源码文件</div>
-    <div id="fileList" style="padding:4px 0;"></div>
-  </div>
-  <!-- 代码编辑区 -->
-  <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
-    <div style="padding:8px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;background:var(--surface);">
-      <span id="codePath" style="font-family:monospace;font-size:0.85rem;color:var(--text-light);">选择文件</span>
-      <div style="flex:1;"></div>
-      <button class="btn-secondary" id="btnEditCode" onclick="editCode()" style="display:none;">编辑</button>
-      <button class="btn-secondary" id="btnCancelCode" onclick="cancelEdit()" style="display:none;">取消</button>
-      <button class="btn-primary" id="btnSaveCode" onclick="saveCode()" style="display:none;">保存</button>
-      <span id="codeStatus" style="font-size:0.8rem;color:var(--text-light);"></span>
-    </div>
-    <div style="flex:1;overflow:auto;background:#1e1e2e;">
-      <pre id="codeContent" style="margin:0;padding:16px;font-family:'SF Mono','Fira Code',monospace;font-size:0.82rem;line-height:1.6;color:#cdd6f4;white-space:pre-wrap;word-break:break-all;"></pre>
-      <textarea id="codeEditor" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;padding:16px;font-family:'SF Mono','Fira Code',monospace;font-size:0.82rem;line-height:1.6;background:#1e1e2e;color:#cdd6f4;border:none;outline:none;resize:none;white-space:pre-wrap;" spellcheck="false"></textarea>
-    </div>
+  <div class="log-content" id="logPanel">
+    <div class="log-line">Loom 流程编辑器已就绪。</div>
   </div>
 </div>
 
 <script>
-let nodeData = { nodes: [], edges: [] };
-let initialPositions = {};
-let lastResult = null;
-let chatMessages = [];
-let llmConfig = {};
+// ════════════════════════════════════════════════════════════
+//  节点类型定义
+// ════════════════════════════════════════════════════════════
+const NODE_TYPES = {
+  // ── 数据 ──
+  dataset: {
+    label: '数据集', category: 'data', icon: '📊', color: 'var(--cat-data)',
+    codeFile: 'datasets/toy.py',
+    inputs: [],
+    outputs: [{ name: 'data', label: 'X, y' }],
+    config: {
+      dataset_name: { type: 'select', label: '数据集', options: ['diabetes', 'breast_cancer', 'california_housing'], default: 'diabetes' },
+    },
+  },
+  csv_upload: {
+    label: 'CSV 上传', category: 'data', icon: '📁', color: 'var(--cat-data)',
+    codeFile: 'datasets/csv_loader.py',
+    inputs: [],
+    outputs: [{ name: 'data', label: 'X, y' }],
+    config: {
+      file: { type: 'file', label: 'CSV 文件', accept: '.csv' },
+      target_column: { type: 'string', label: '目标列名' },
+      task_type: { type: 'select', label: '任务类型', options: ['regression', 'classification'], default: 'regression' },
+    },
+  },
+  data_analysis: {
+    label: '数据分析', category: 'data', icon: '🔍', color: 'var(--cat-data)',
+    codeFile: 'server.py',
+    inputs: [{ name: 'data', label: 'X, y' }],
+    outputs: [{ name: 'summary', label: '统计' }],
+    config: {},
+  },
 
-// ── 初始化 ───────────────────────────────────────────
-async function init() {
-  await loadModels();
-  await loadDatasets();
-  await loadLLMConfig();
-}
+  // ── 处理 ──
+  split: {
+    label: '数据切分', category: 'process', icon: '✂️', color: 'var(--cat-process)',
+    codeFile: 'core/runner.py',
+    inputs: [{ name: 'data', label: 'X, y' }],
+    outputs: [{ name: 'train', label: '训练集' }, { name: 'test', label: '测试集' }],
+    config: {
+      test_size: { type: 'number', label: '测试集比例', default: 0.2, step: 0.05, min: 0.05, max: 0.5 },
+      seed: { type: 'number', label: '随机种子', default: 42 },
+    },
+  },
 
-async function loadModels() {
-  const res = await fetch('/api/models');
-  const data = await res.json();
-  const list = document.getElementById('modelList');
-  list.innerHTML = '';
-  data.models.forEach(m => {
-    const div = document.createElement('div');
-    div.className = 'model-item';
-    div.innerHTML = `<input type="checkbox" value="${m}" id="model-${m}" checked><label for="model-${m}">${m}</label>`;
-    list.appendChild(div);
-  });
-}
+  // ── 模型 ──
+  model: {
+    label: '模型训练', category: 'model', icon: '🧠', color: 'var(--cat-model)',
+    codeFile: 'models/linear.py',
+    inputs: [{ name: 'train', label: '训练集' }],
+    outputs: [{ name: 'model', label: '模型' }],
+    config: {
+      model_name: { type: 'select', label: '模型', options: ['linear_regression', 'random_forest', 'ridge', 'logistic_regression'], default: 'linear_regression' },
+    },
+  },
+  search: {
+    label: '超参搜索', category: 'model', icon: '⚙️', color: 'var(--cat-model)',
+    codeFile: 'core/runner.py',
+    inputs: [{ name: 'model', label: '模型' }],
+    outputs: [{ name: 'best_model', label: '最优模型' }],
+    config: {
+      n_iter: { type: 'number', label: '迭代次数', default: 10, min: 1, max: 100 },
+      cv: { type: 'number', label: '交叉验证折数', default: 5, min: 2, max: 20 },
+    },
+  },
 
-async function loadDatasets() {
-  const res = await fetch('/api/datasets');
-  const data = await res.json();
-  const sel = document.getElementById('datasetSelect');
-  sel.innerHTML = '';
-  data.datasets.forEach(d => {
-    const opt = document.createElement('option');
-    opt.value = d; opt.textContent = d;
-    sel.appendChild(opt);
-  });
-}
+  // ── 评估 ──
+  metric: {
+    label: '评估指标', category: 'eval', icon: '📈', color: 'var(--cat-eval)',
+    codeFile: 'core/runner.py',
+    inputs: [{ name: 'model', label: '模型' }, { name: 'test', label: '测试集' }],
+    outputs: [{ name: 'metrics', label: '指标' }],
+    config: {},
+  },
+  comparison: {
+    label: '模型对比', category: 'eval', icon: '🏆', color: 'var(--cat-eval)',
+    codeFile: 'core/runner.py',
+    inputs: [{ name: 'metrics', label: '指标列表' }],
+    outputs: [],
+    config: {
+      select_best: { type: 'checkbox', label: '自动选优', default: true },
+    },
+  },
 
-async function loadLLMConfig() {
-  const res = await fetch('/api/config');
-  const data = await res.json();
-  llmConfig = data;
-  if (data.provider) document.getElementById('llmProvider').value = data.provider;
-  if (data.model) document.getElementById('llmModel').value = data.model;
-  if (data.base_url) document.getElementById('llmBaseUrl').value = data.base_url;
-}
+  // ── LLM ──
+  llm_pre: {
+    label: '训练前 LLM 分析', category: 'llm', icon: '🤖', color: 'var(--cat-llm)',
+    codeFile: 'core/llm_analyzer.py',
+    inputs: [{ name: 'data', label: 'X, y' }],
+    outputs: [{ name: 'analysis', label: '分析' }],
+    config: {},
+  },
+  llm_post: {
+    label: '结果解读', category: 'llm', icon: '💬', color: 'var(--cat-llm)',
+    codeFile: 'core/llm_analyzer.py',
+    inputs: [{ name: 'metrics', label: '指标' }],
+    outputs: [{ name: 'interpretation', label: '解读' }],
+    config: {
+      llm_post_scope: { type: 'select', label: '解读范围', options: ['all', 'best'], default: 'all' },
+    },
+  },
+  llm_config: {
+    label: 'LLM 配置', category: 'llm', icon: '⚙️', color: 'var(--cat-llm)',
+    codeFile: 'core/llm_analyzer.py',
+    inputs: [],
+    outputs: [{ name: 'config', label: '配置' }],
+    config: {
+      provider: { type: 'select', label: 'Provider', options: ['', 'deepseek', 'ollama'], default: '' },
+      api_key: { type: 'password', label: 'API Key' },
+      base_url: { type: 'string', label: 'Base URL' },
+      model: { type: 'string', label: '模型名' },
+      timeout: { type: 'number', label: '超时(秒)', default: 120 },
+    },
+  },
 
-function onDatasetChange() {}
-function onLLMProviderChange() {
-  const p = document.getElementById('llmProvider').value;
-  if (p === 'ollama') {
-    if (!document.getElementById('llmModel').value) document.getElementById('llmModel').value = 'qwen3.5:4b';
-    if (!document.getElementById('llmApiKey').value) document.getElementById('llmApiKey').value = 'placeholder';
-  } else if (p === 'deepseek') {
-    if (!document.getElementById('llmModel').value) document.getElementById('llmModel').value = 'deepseek-chat';
+  // ── 输出 ──
+  output: {
+    label: '保存结果', category: 'output', icon: '💾', color: 'var(--cat-output)',
+    codeFile: 'core/store.py',
+    inputs: [{ name: 'result', label: '结果' }],
+    outputs: [],
+    config: {},
+  },
+};
+
+const CATEGORIES = {
+  data: { label: '数据', icon: '📥' },
+  process: { label: '处理', icon: '🔧' },
+  model: { label: '模型', icon: '🧠' },
+  eval: { label: '评估', icon: '📊' },
+  llm: { label: 'LLM', icon: '🤖' },
+  output: { label: '输出', icon: '💾' },
+};
+
+// ════════════════════════════════════════════════════════════
+//  状态
+// ════════════════════════════════════════════════════════════
+let nodes = [];  // {id, type, x, y, config, status, display}
+let edges = [];  // {source, target}
+let selectedNode = null;
+let nodeIdCounter = 0;
+let draggingNode = null;
+let connectingPort = null;
+
+// ════════════════════════════════════════════════════════════
+//  左栏：节点库渲染
+// ════════════════════════════════════════════════════════════
+function renderNodeLibrary(filter = '') {
+  const container = document.getElementById('nodeLibrary');
+  container.innerHTML = '';
+  for (const [catKey, cat] of Object.entries(CATEGORIES)) {
+    const types = Object.entries(NODE_TYPES).filter(([t, def]) => {
+      if (def.category !== catKey) return false;
+      if (filter && !def.label.toLowerCase().includes(filter.toLowerCase()) && !t.includes(filter.toLowerCase())) return false;
+      return true;
+    });
+    if (types.length === 0) continue;
+
+    const catDiv = document.createElement('div');
+    catDiv.className = 'node-category';
+    catDiv.innerHTML = `
+      <div class="cat-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <span class="cat-icon">${cat.icon}</span>
+        <span>${cat.label}</span>
+        <span class="cat-count">${types.length}</span>
+      </div>
+      <div class="cat-items"></div>
+    `;
+    const itemsDiv = catDiv.querySelector('.cat-items');
+    types.forEach(([type, def]) => {
+      const item = document.createElement('div');
+      item.className = 'node-item';
+      item.draggable = true;
+      item.innerHTML = `
+        <span class="node-dot" style="background:${def.color}"></span>
+        <span>${def.icon}</span>
+        <span>${def.label}</span>
+      `;
+      item.ondragstart = (e) => {
+        e.dataTransfer.setData('node-type', type);
+      };
+      itemsDiv.appendChild(item);
+    });
+    container.appendChild(catDiv);
   }
 }
 
-// ── CSV 上传 ─────────────────────────────────────────
-async function uploadCSV(input) {
+function filterNodes(val) { renderNodeLibrary(val); }
+
+// ════════════════════════════════════════════════════════════
+//  画布：拖拽放置
+// ════════════════════════════════════════════════════════════
+const canvas = document.getElementById('canvas');
+
+canvas.ondragover = (e) => { e.preventDefault(); };
+canvas.ondrop = (e) => {
+  e.preventDefault();
+  const type = e.dataTransfer.getData('node-type');
+  if (!type || !NODE_TYPES[type]) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left - 100;
+  const y = e.clientY - rect.top - 20;
+  addNode(type, x, y);
+};
+
+function addNode(type, x, y) {
+  const def = NODE_TYPES[type];
+  const id = `node-${++nodeIdCounter}`;
+  const config = {};
+  // 初始化默认配置
+  for (const [key, cfg] of Object.entries(def.config || {})) {
+    config[key] = cfg.default !== undefined ? cfg.default : (cfg.type === 'checkbox' ? false : '');
+  }
+  const node = { id, type, x, y, config, status: 'idle', display: {} };
+  nodes.push(node);
+  renderCanvas();
+  selectNode(id);
+  addLog(`添加节点: ${def.label} (${id})`);
+}
+
+function renderCanvas() {
+  // 清除旧节点
+  canvas.querySelectorAll('.canvas-node').forEach(n => n.remove());
+  document.getElementById('canvasEmpty').style.display = nodes.length === 0 ? 'block' : 'none';
+
+  nodes.forEach(node => {
+    const def = NODE_TYPES[node.type];
+    const el = document.createElement('div');
+    el.className = `canvas-node status-${node.status}`;
+    if (selectedNode === node.id) el.classList.add('selected');
+    el.style.left = `${node.x}px`;
+    el.style.top = `${node.y}px`;
+    el.id = `cn-${node.id}`;
+
+    // 标题栏
+    const titleColor = def.color.startsWith('var') ? '' : def.color;
+    el.innerHTML = `
+      <div class="node-title" style="background:${def.color}">
+        <span>${def.icon}</span>
+        <span>${def.label}</span>
+      </div>
+      <div class="node-body">${renderNodeBody(node)}</div>
+      <div class="node-ports">
+        <div style="display:flex;gap:4px;align-items:center;">
+          ${(def.inputs||[]).map(p => `<div class="port input" data-node="${node.id}" data-port="${p.name}" data-dir="input" title="${p.label}"></div>`).join('')}
+        </div>
+        <div style="display:flex;gap:4px;align-items:center;">
+          ${(def.outputs||[]).map(p => `<div class="port output" data-node="${node.id}" data-port="${p.name}" data-dir="output" title="${p.label}"></div>`).join('')}
+        </div>
+      </div>
+    `;
+    el.onmousedown = (e) => startDrag(node, e);
+    el.onclick = (e) => { e.stopPropagation(); selectNode(node.id); };
+    canvas.appendChild(el);
+  });
+
+  // 端口连线事件
+  canvas.querySelectorAll('.port').forEach(port => {
+    port.onmousedown = (e) => { e.stopPropagation(); startConnect(port, e); };
+  });
+
+  renderEdges();
+}
+
+function renderNodeBody(node) {
+  const def = NODE_TYPES[node.type];
+  const d = node.display || {};
+  const statusIcons = { idle: '', success: '✅', running: '⏳', failed: '❌', skipped: '⏭️' };
+
+  let body = '';
+  switch (node.type) {
+    case 'dataset':
+      body = `<div>${d.n_samples || '?'} 样本 × ${d.n_features || '?'} 特征</div>`;
+      if (d.feature_names) body += `<div style="font-size:0.65rem;opacity:0.7;">${d.feature_names.slice(0,3).join(', ')}...</div>`;
+      break;
+    case 'split':
+      body = `<div>test_size=${node.config.test_size}</div><div>seed=${node.config.seed}</div>`;
+      if (d.n_train) body += `<div style="margin-top:2px;">训练${d.n_train}/测试${d.n_test}</div>`;
+      break;
+    case 'model':
+      body = `<div>${node.config.model_name}</div>`;
+      if (d.params) body += `<div style="font-size:0.65rem;opacity:0.7;">${Object.entries(d.params).slice(0,2).map(([k,v])=>`${k}=${typeof v==='number'?v.toFixed(3):v}`).join(', ')}</div>`;
+      break;
+    case 'metric':
+      body = Object.entries(d).filter(([k])=>k!=='model_name').map(([k,v])=>`${k}=${typeof v==='number'?v.toFixed(4):v}`).join('<br>') || '等待评估';
+      break;
+    case 'llm_pre':
+    case 'llm_post':
+      if (d.content) body = `<div style="max-height:60px;overflow-y:auto;">${escapeHTML(d.content).slice(0,150)}...</div>`;
+      else body = '等待分析';
+      break;
+    case 'comparison':
+      if (d.models) body = d.models.map(m=>`${m.is_best?'⭐':''}${m.model_name}`).join('<br>');
+      else body = '等待对比';
+      break;
+    case 'llm_config':
+      body = `<div>${node.config.provider || '未配置'}</div>`;
+      if (node.config.model) body += `<div style="font-size:0.65rem;opacity:0.7;">${node.config.model}</div>`;
+      break;
+    default:
+      body = '';
+  }
+  if (statusIcons[node.status]) body = `<div>${statusIcons[node.status]} ${body}</div>`;
+  return body;
+}
+
+// ════════════════════════════════════════════════════════════
+//  画布：拖拽节点
+// ════════════════════════════════════════════════════════════
+function startDrag(node, e) {
+  if (e.target.classList.contains('port')) return;
+  selectedNode = node.id;
+  const el = document.getElementById(`cn-${node.id}`);
+  const startX = e.clientX, startY = e.clientY;
+  const origX = node.x, origY = node.y;
+  el.classList.add('dragging');
+
+  const onMove = (e) => {
+    node.x = origX + (e.clientX - startX);
+    node.y = origY + (e.clientY - startY);
+    el.style.left = `${node.x}px`;
+    el.style.top = `${node.y}px`;
+    renderEdges();
+  };
+  const onUp = () => {
+    el.classList.remove('dragging');
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    selectNode(node.id);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+// ════════════════════════════════════════════════════════════
+//  画布：连线
+// ════════════════════════════════════════════════════════════
+function startConnect(port, e) {
+  const nodeId = port.dataset.node;
+  const portName = port.dataset.port;
+  const dir = port.dataset.dir;
+  if (dir !== 'output') return;  // 只能从输出拉到输入
+
+  const onMove = (e) => {
+    renderEdges(e);
+  };
+  const onUp = (e) => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    // 检查是否落在输入端口上
+    const target = document.elementFromPoint(e.clientX, e.clientY);
+    if (target && target.classList.contains('port') && target.dataset.dir === 'input') {
+      const targetNode = target.dataset.node;
+      if (targetNode !== nodeId) {
+        // 避免重复连线
+        if (!edges.some(ed => ed.source === nodeId && ed.target === targetNode)) {
+          edges.push({ source: nodeId, target: targetNode });
+          addLog(`连线: ${nodeId} → ${targetNode}`);
+        }
+      }
+    }
+    renderEdges();
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+function renderEdges(tempEnd = null) {
+  const svg = document.getElementById('edgeLayer');
+  // 清除旧路径（保留 defs）
+  svg.querySelectorAll('path').forEach(p => p.remove());
+
+  const rect = canvas.getBoundingClientRect();
+  svg.setAttribute('width', rect.width);
+  svg.setAttribute('height', rect.height);
+
+  edges.forEach(edge => {
+    const s = document.getElementById(`cn-${edge.source}`);
+    const t = document.getElementById(`cn-${edge.target}`);
+    if (!s || !t) return;
+    const x1 = s.offsetLeft + s.offsetWidth;
+    const y1 = s.offsetTop + s.offsetHeight / 2;
+    const x2 = t.offsetLeft;
+    const y2 = t.offsetTop + t.offsetHeight / 2;
+    const mx = (x1 + x2) / 2;
+    svg.appendChild(createPath(x1, y1, mx, y1, mx, y2, x2, y2));
+  });
+
+  // 临时连线（拖拽中）
+  if (tempEnd) {
+    const s = document.getElementById(`cn-${selectedNode}`);
+    if (s) {
+      const x1 = s.offsetLeft + s.offsetWidth;
+      const y1 = s.offsetTop + s.offsetHeight / 2;
+      const x2 = tempEnd.clientX - rect.left;
+      const y2 = tempEnd.clientY - rect.top;
+      const mx = (x1 + x2) / 2;
+      const path = createPath(x1, y1, mx, y1, mx, y2, x2, y2);
+      path.setAttribute('stroke-dasharray', '4,4');
+      path.setAttribute('opacity', '0.5');
+      svg.appendChild(path);
+    }
+  }
+}
+
+function createPath(x1, y1, cx1, cy1, cx2, cy2, x2, y2) {
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', `M ${x1} ${y1} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${x2} ${y2}`);
+  path.setAttribute('marker-end', 'url(#arrow)');
+  return path;
+}
+
+// ════════════════════════════════════════════════════════════
+//  右栏：参数配置面板
+// ════════════════════════════════════════════════════════════
+function selectNode(id) {
+  selectedNode = id;
+  renderCanvas();
+  renderConfigPanel();
+}
+
+function renderConfigPanel() {
+  const panel = document.getElementById('configPanel');
+  const title = document.getElementById('configTitle');
+  if (!selectedNode) {
+    title.textContent = '参数配置';
+    panel.innerHTML = '<div class="config-empty">点击画布上的节点查看参数</div>';
+    return;
+  }
+  const node = nodes.find(n => n.id === selectedNode);
+  if (!node) return;
+  const def = NODE_TYPES[node.type];
+  title.textContent = `${def.icon} ${def.label}`;
+
+  let html = `<div class="config-section-title">节点信息</div>`;
+  html += `<div class="config-group"><label>ID</label><input type="text" value="${node.id}" readonly></div>`;
+  html += `<div class="config-group"><label>类型</label><input type="text" value="${node.type}" readonly></div>`;
+  html += `<div class="config-group"><label>状态</label><input type="text" value="${node.status}" readonly></div>`;
+
+  // 参数表单
+  const configKeys = Object.keys(def.config || {});
+  if (configKeys.length > 0) {
+    html += `<div class="config-section-title">参数配置</div>`;
+    for (const [key, cfg] of Object.entries(def.config)) {
+      html += `<div class="config-group"><label>${cfg.label}</label>`;
+      const val = node.config[key] !== undefined ? node.config[key] : '';
+      if (cfg.type === 'select') {
+        html += `<select onchange="updateConfig('${key}', this.value)">`;
+        for (const opt of cfg.options) {
+          html += `<option value="${opt}" ${val === opt ? 'selected' : ''}>${opt || '— 选择 —'}</option>`;
+        }
+        html += `</select>`;
+      } else if (cfg.type === 'checkbox') {
+        html += `<div class="checkbox-row"><input type="checkbox" ${val ? 'checked' : ''} onchange="updateConfig('${key}', this.checked)"><span>${cfg.label}</span></div>`;
+      } else if (cfg.type === 'number') {
+        html += `<input type="number" value="${val}" step="${cfg.step || 1}" min="${cfg.min || ''}" max="${cfg.max || ''}" onchange="updateConfig('${key}', parseFloat(this.value))">`;
+      } else if (cfg.type === 'file') {
+        html += `<input type="file" accept="${cfg.accept || ''}" onchange="handleFileUpload(this, '${key}')">`;
+      } else if (cfg.type === 'password') {
+        html += `<input type="password" value="${val}" onchange="updateConfig('${key}', this.value)" placeholder="${cfg.label}">`;
+      } else {
+        html += `<input type="text" value="${val}" onchange="updateConfig('${key}', this.value)" placeholder="${cfg.label}">`;
+      }
+      html += `</div>`;
+    }
+  }
+
+  // 对应代码
+  if (def.codeFile) {
+    html += `<div class="code-preview">
+      <div class="code-header">
+        <span>📄 对应代码: ${def.codeFile}</span>
+        <button onclick="loadNodeCode('${def.codeFile}')">查看</button>
+      </div>
+      <pre id="codePreview" style="display:none;"></pre>
+    </div>`;
+  }
+
+  // 删除按钮
+  html += `<div style="margin-top:16px;"><button class="btn" style="width:100%;color:var(--danger);border-color:var(--danger);" onclick="deleteNode('${node.id}')">🗑 删除节点</button></div>`;
+
+  panel.innerHTML = html;
+}
+
+function updateConfig(key, val) {
+  if (!selectedNode) return;
+  const node = nodes.find(n => n.id === selectedNode);
+  if (!node) return;
+  node.config[key] = val;
+  renderCanvas();
+  addLog(`修改参数: ${node.type}.${key} = ${val}`);
+}
+
+async function handleFileUpload(input, key) {
   const file = input.files[0];
   if (!file) return;
   const formData = new FormData();
@@ -376,82 +793,96 @@ async function uploadCSV(input) {
   const res = await fetch('/api/upload_csv', { method: 'POST', body: formData });
   const data = await res.json();
   if (data.status === 'success') {
-    document.getElementById('csvConfig').style.display = 'block';
-    const sel = document.getElementById('csvTargetCol');
-    sel.innerHTML = '';
-    data.columns.forEach(c => {
-      const opt = document.createElement('option');
-      opt.value = c; opt.textContent = c;
-      sel.appendChild(opt);
-    });
-    addLog(`CSV 上传成功：${data.n_rows} 行 × ${data.columns.length} 列`, 'success');
+    addLog(`CSV 上传成功: ${data.n_rows} 行 × ${data.columns.length} 列`, 'success');
+    updateConfig('_csv_filepath', data.filepath);
+    updateConfig('_csv_columns', data.columns);
+    // 自动填充目标列
+    if (data.columns.length > 0) {
+      const lastCol = data.columns[data.columns.length - 1];
+      const node = nodes.find(n => n.id === selectedNode);
+      if (node && !node.config.target_column) {
+        node.config.target_column = lastCol;
+        renderConfigPanel();
+      }
+    }
   } else {
     addLog(`CSV 上传失败: ${data.message}`, 'error');
   }
 }
 
-async function registerCSV() {
-  const fileInput = document.getElementById('csvFile');
-  const targetCol = document.getElementById('csvTargetCol').value;
-  const taskType = document.getElementById('csvTaskType').value;
-  if (!fileInput.files[0] || !targetCol) { addLog('请先上传 CSV 并选择目标列', 'error'); return; }
-  const formData = new FormData();
-  formData.append('file', fileInput.files[0]);
-  formData.append('target_column', targetCol);
-  formData.append('task_type', taskType);
-  formData.append('name', fileInput.files[0].name.replace('.csv', ''));
-  const res = await fetch('/api/register_csv', { method: 'POST', body: formData });
+async function loadNodeCode(filepath) {
+  const pre = document.getElementById('codePreview');
+  if (pre.style.display === 'block') { pre.style.display = 'none'; return; }
+  pre.textContent = '加载中...';
+  pre.style.display = 'block';
+  const res = await fetch(`/api/code/${filepath}`);
   const data = await res.json();
   if (data.status === 'success') {
-    addLog(`CSV 数据集已注册: ${data.name}`, 'success');
-    await loadDatasets();
-    document.getElementById('datasetSelect').value = data.name;
+    pre.textContent = data.content;
   } else {
-    addLog(`注册失败: ${data.message}`, 'error');
+    pre.textContent = '加载失败: ' + data.message;
   }
 }
 
-// ── 运行流水线 ───────────────────────────────────────
-function getLLMConfig() {
-  return {
-    provider: document.getElementById('llmProvider').value,
-    api_key: document.getElementById('llmApiKey').value,
-    base_url: document.getElementById('llmBaseUrl').value,
-    model: document.getElementById('llmModel').value,
-  };
+function deleteNode(id) {
+  nodes = nodes.filter(n => n.id !== id);
+  edges = edges.filter(e => e.source !== id && e.target !== id);
+  selectedNode = null;
+  renderCanvas();
+  renderConfigPanel();
+  addLog(`删除节点: ${id}`);
 }
 
-async function runPipeline() {
-  const models = Array.from(document.querySelectorAll('.model-item input:checked')).map(cb => cb.value);
-  const dataset = document.getElementById('datasetSelect').value;
-  if (models.length === 0) { addLog('请至少选择一个模型', 'error'); return; }
-  if (!dataset) { addLog('请选择数据集', 'error'); return; }
+// ════════════════════════════════════════════════════════════
+//  运行流水线
+// ════════════════════════════════════════════════════════════
+async function runFlow() {
+  if (nodes.length === 0) { addLog('画布为空，请先添加节点', 'error'); return; }
 
-  document.getElementById('btnRun').disabled = true;
-  document.getElementById('btnRun').textContent = '运行中...';
-  clearLog();
-  setStatus('running', '运行中');
-  addLog(`启动流水线：模型=${models}，数据集=${dataset}`, '');
+  // 从画布节点提取运行参数
+  const datasetNode = nodes.find(n => n.type === 'dataset' || n.type === 'csv_upload');
+  const modelNodes = nodes.filter(n => n.type === 'model');
+  const splitNode = nodes.find(n => n.type === 'split');
+  const llmConfigNode = nodes.find(n => n.type === 'llm_config');
+  const searchNode = nodes.find(n => n.type === 'search');
+  const comparisonNode = nodes.find(n => n.type === 'comparison');
+  const llmPreNode = nodes.find(n => n.type === 'llm_pre');
+  const llmPostNode = nodes.find(n => n.type === 'llm_post');
 
-  // 先渲染空画布
-  document.getElementById('emptyState').style.display = 'none';
+  if (!datasetNode) { addLog('缺少数据集节点', 'error'); return; }
+  if (modelNodes.length === 0) { addLog('缺少模型节点', 'error'); return; }
+
+  const modelNames = modelNodes.map(n => n.config.model_name).filter(Boolean);
+  if (modelNames.length === 0) { addLog('模型节点未选择模型', 'error'); return; }
 
   const body = {
-    model_names: models,
-    dataset_name: dataset,
-    test_size: parseFloat(document.getElementById('testSize').value),
-    seed: parseInt(document.getElementById('seed').value),
-    select_best: document.getElementById('selectBest').checked,
-    llm_post_scope: document.getElementById('llmPostScope').value,
-    search: document.getElementById('searchEnabled').checked,
-    n_iter: parseInt(document.getElementById('nIter').value),
-    cv: parseInt(document.getElementById('cv').value),
-    llm_provider: document.getElementById('llmProvider').value,
-    llm_api_key: document.getElementById('llmApiKey').value,
-    llm_base_url: document.getElementById('llmBaseUrl').value,
-    llm_model: document.getElementById('llmModel').value,
-    llm_timeout: document.getElementById('llmTimeout') ? document.getElementById('llmTimeout').value : '',
+    model_names: modelNames,
+    dataset_name: datasetNode.config.dataset_name || 'diabetes',
+    test_size: splitNode ? splitNode.config.test_size : 0.2,
+    seed: splitNode ? splitNode.config.seed : 42,
+    select_best: comparisonNode ? comparisonNode.config.select_best : false,
+    llm_post_scope: llmPostNode ? llmPostNode.config.llm_post_scope : 'all',
+    search: !!searchNode,
+    n_iter: searchNode ? searchNode.config.n_iter : 10,
+    cv: searchNode ? searchNode.config.cv : 5,
   };
+
+  // LLM 配置
+  if (llmConfigNode) {
+    body.llm_provider = llmConfigNode.config.provider || '';
+    body.llm_api_key = llmConfigNode.config.api_key || '';
+    body.llm_base_url = llmConfigNode.config.base_url || '';
+    body.llm_model = llmConfigNode.config.model || '';
+    body.llm_timeout = llmConfigNode.config.timeout || 120;
+  }
+
+  addLog(`启动流水线: 模型=${modelNames}, 数据集=${body.dataset_name}`);
+  setStatus('running', '运行中...');
+  document.getElementById('btnRun').disabled = true;
+
+  // 标记所有节点为 running
+  nodes.forEach(n => n.status = 'running');
+  renderCanvas();
 
   try {
     const res = await fetch('/api/run_stream', {
@@ -476,328 +907,103 @@ async function runPipeline() {
         const data = JSON.parse(line.slice(6));
 
         if (data.type === 'step') {
-          const statusIcon = { running: '⏳', success: '✅', failed: '❌', skipped: '⏭️' }[data.status] || '⏳';
-          addLog(`${statusIcon} [${data.step}] ${data.message}`, data.status === 'failed' ? 'error' : data.status === 'success' ? 'success' : '');
+          const icon = { running: '⏳', success: '✅', failed: '❌', skipped: '⏭️' }[data.status] || '⏳';
+          addLog(`${icon} [${data.step}] ${data.message}`, data.status === 'failed' ? 'error' : data.status === 'success' ? 'success' : '');
+          // 更新对应节点状态
+          updateNodeStatus(data);
         } else if (data.type === 'done') {
-          nodeData = { nodes: data.nodes, edges: data.edges, run_id: data.run_id };
-          lastResult = data;
-          initialPositions = {};
-          data.nodes.forEach(n => { initialPositions[n.id] = { ...n.position }; });
+          // 用后端返回的 nodes/edges 更新画布
+          if (data.nodes) {
+            // 保留用户画布上的位置，更新状态和 display
+            for (const srvNode of data.nodes) {
+              const localNode = nodes.find(n => n.type === srvNode.type || n.id === srvNode.id);
+              // 直接用后端的 nodes 替换
+            }
+            // 简单替换：用后端返回的 nodes
+            nodes = data.nodes.map(n => {
+              const existing = nodes.find(ln => ln.id === n.id || ln.type === n.type);
+              return { ...n, x: existing ? existing.x : n.position.x, y: existing ? existing.y : n.position.y };
+            });
+            edges = data.edges.map(e => ({ source: e.source, target: e.target }));
+          }
           renderCanvas();
           setStatus('success', '完成');
           addLog(`\n✅ 流水线完成！run_id=${data.run_id}`, 'success');
           if (data.best_model) addLog(`⭐ 最优模型: ${data.best_model}`, 'success');
           for (const [name, m] of Object.entries(data.metrics)) {
-            const metricsStr = Object.entries(m).map(([k,v]) => `${k}=${v.toFixed(4)}`).join('  ');
-            addLog(`  ${name}: ${metricsStr}`, '');
+            const s = Object.entries(m).map(([k,v]) => `${k}=${v.toFixed(4)}`).join('  ');
+            addLog(`  ${name}: ${s}`);
           }
         } else if (data.type === 'error') {
           addLog(`❌ ${data.message}`, 'error');
           setStatus('error', '错误');
-          if (data.log) data.log.split('\n').forEach(l => { if (l.trim()) addLog(l, 'error'); });
+          nodes.forEach(n => { if (n.status === 'running') n.status = 'failed'; });
+          renderCanvas();
         }
       }
     }
   } catch (e) {
     addLog(`❌ 请求失败: ${e.message}`, 'error');
     setStatus('error', '错误');
+  } finally {
+    document.getElementById('btnRun').disabled = false;
   }
-
-  document.getElementById('btnRun').disabled = false;
-  document.getElementById('btnRun').textContent = '▶ 运行流水线';
 }
 
-// ── 画布渲染 ─────────────────────────────────────────
-function renderCanvas() {
-  const canvas = document.getElementById('canvas');
-  document.getElementById('emptyState').style.display = 'none';
-  canvas.querySelectorAll('.node').forEach(n => n.remove());
-  // 计算垂直偏移，确保节点不会跑到画布顶部之上
-  const ys = nodeData.nodes.map(n => n.position.y);
-  const minY = Math.min(...ys);
-  const yOffset = minY < 0 ? -minY + 40 : 40;
-  nodeData.nodes.forEach(node => {
-    const el = document.createElement('div');
-    el.className = `node ${node.status}`;
-    el.style.left = `${node.position.x}px`;
-    el.style.top = `${node.position.y + yOffset}px`;
-    el.id = `node-${node.id}`;
-    let body = '';
-    const d = node.display || {};
-    switch (node.type) {
-      case 'dataset':
-        body = `<div>${d.n_samples} 样本 × ${d.n_features} 特征</div><div style="font-size:0.7rem;margin-top:2px;">${(d.feature_names||[]).slice(0,3).join(', ')}...</div>`;
-        break;
-      case 'model':
-        body = `<div>${d.model_name}</div>`;
-        break;
-      case 'metric':
-        body = Object.entries(d).filter(([k]) => k !== 'model_name').map(([k,v]) => `${k}: ${typeof v === 'number' ? v.toFixed(4) : v}`).join('<br>');
-        break;
-      case 'llm_analysis':
-        if (d.structured) body = `<pre style="font-size:0.65rem;">${escapeHTML(JSON.stringify(d.structured, null, 2))}</pre>`;
-        else if (d.content) body = `<div style="max-height:80px;overflow-y:auto;">${escapeHTML(d.content).slice(0,200)}...</div>`;
-        else body = '<i>已跳过</i>';
-        break;
-      case 'comparison':
-        body = (d.models||[]).map(m => `${m.model_name}: ${m.is_best ? '⭐' : ''} r2=${(m.r2||0).toFixed(4)}`).join('<br>');
-        break;
-      case 'config':
-        body = Object.entries(d).filter(([k,v]) => v !== null && v !== undefined).map(([k,v]) => `${k}: ${v}`).join('<br>');
-        break;
-      case 'split':
-        body = `<div>训练: ${d.n_train} | 测试: ${d.n_test}</div><div style="font-size:0.7rem;margin-top:2px;">test_size=${d.test_size}, seed=${d.seed}${d.stratified ? ', 分层' : ''}</div>`;
-        break;
-      case 'search':
-        if (node.status === 'skipped') body = `<i>${d.note || '跳过'}</i>`;
-        else body = `<div>best_score: ${d.best_score ? d.best_score.toFixed(4) : 'N/A'}</div><div style="font-size:0.7rem;margin-top:2px;">n_iter=${d.n_iter}, cv=${d.cv}</div>`;
-        break;
+function updateNodeStatus(data) {
+  // 根据 step 更新画布节点状态
+  const stepMap = {
+    'dataset': 'dataset', 'split': 'split', 'train': 'model', 'search': 'search',
+    'metric': 'metric', 'llm_pre': 'llm_pre', 'llm_post': 'llm_post',
+    'select_best': 'comparison',
+  };
+  const nodeType = stepMap[data.step];
+  if (nodeType) {
+    const node = nodes.find(n => n.type === nodeType);
+    if (node) {
+      node.status = data.status;
+      renderCanvas();
     }
-    el.innerHTML = `<div class="node-title">${node.label}</div><div class="node-body">${body}</div>`;
-    makeDraggable(el, node);
-    canvas.appendChild(el);
-  });
-  renderEdges();
+  }
 }
 
-function renderEdges() {
-  const svg = document.getElementById('edgeLayer');
-  svg.innerHTML = '';
-  const canvas = document.getElementById('canvas');
-  const rect = canvas.getBoundingClientRect();
-  svg.setAttribute('width', rect.width);
-  svg.setAttribute('height', Math.max(rect.height, 500));
-  nodeData.edges.forEach(edge => {
-    const s = document.getElementById(`node-${edge.source}`);
-    const t = document.getElementById(`node-${edge.target}`);
-    if (!s || !t) return;
-    const x1 = s.offsetLeft + s.offsetWidth / 2;
-    const y1 = s.offsetTop + s.offsetHeight / 2;
-    const x2 = t.offsetLeft + t.offsetWidth / 2;
-    const y2 = t.offsetTop + t.offsetHeight / 2;
-    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    line.setAttribute('x1', x1); line.setAttribute('y1', y1);
-    line.setAttribute('x2', x2); line.setAttribute('y2', y2);
-    line.setAttribute('stroke', '#ccc'); line.setAttribute('stroke-width', '2');
-    line.setAttribute('marker-end', 'url(#arrowhead)');
-    svg.appendChild(line);
-  });
-  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-  defs.innerHTML = '<marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#ccc"/></marker>';
-  svg.appendChild(defs);
-}
-
-function makeDraggable(el, node) {
-  let isDragging = false, startX, startY, origX, origY;
-  const ys = nodeData.nodes.map(n => n.position.y);
-  const minY = Math.min(...ys);
-  const yOffset = minY < 0 ? -minY + 40 : 40;
-  el.addEventListener('mousedown', e => {
-    isDragging = true; el.classList.add('dragging');
-    startX = e.clientX; startY = e.clientY;
-    origX = node.position.x; origY = node.position.y;
-    e.preventDefault();
-  });
-  document.addEventListener('mousemove', e => {
-    if (!isDragging) return;
-    node.position.x = origX + (e.clientX - startX);
-    node.position.y = origY + (e.clientY - startY);
-    el.style.left = `${node.position.x}px`;
-    el.style.top = `${node.position.y + yOffset}px`;
-    renderEdges();
-  });
-  document.addEventListener('mouseup', () => {
-    if (isDragging) { isDragging = false; el.classList.remove('dragging'); }
-  });
+// ════════════════════════════════════════════════════════════
+//  工具函数
+// ════════════════════════════════════════════════════════════
+function clearCanvas() {
+  if (nodes.length > 0 && !confirm('确定清空画布？')) return;
+  nodes = []; edges = []; selectedNode = null;
+  renderCanvas(); renderConfigPanel();
+  addLog('画布已清空');
 }
 
 function resetLayout() {
-  nodeData.nodes.forEach(n => { if (initialPositions[n.id]) n.position = { ...initialPositions[n.id] }; });
+  // 按拓扑顺序排列
+  const xStep = 250, yStep = 120;
+  const cols = {};
+  nodes.forEach((n, i) => {
+    n.x = (i % 4) * xStep;
+    n.y = Math.floor(i / 4) * yStep;
+  });
   renderCanvas();
+  addLog('布局已重置');
 }
 
-// ── LLM 测试 ────────────────────────────────────────
-async function testLLM() {
-  const result = document.getElementById('llmTestResult');
-  result.innerHTML = '<div class="llm-test-result">测试中...</div>';
-  const cfg = getLLMConfig();
-  try {
-    const res = await fetch('/api/llm_test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...cfg, timeout: 15 }),
-    });
-    const data = await res.json();
-    if (data.status === 'success') {
-      result.innerHTML = `<div class="llm-test-result success">✅ ${data.message}</div>`;
-    } else {
-      result.innerHTML = `<div class="llm-test-result error">❌ ${data.message}</div>`;
-    }
-  } catch (e) {
-    result.innerHTML = `<div class="llm-test-result error">❌ ${e.message}</div>`;
-  }
+function autoLayout() {
+  // 简单自动排列：按类型分列
+  const colMap = { dataset: 0, csv_upload: 0, llm_config: 0, llm_pre: 1, data_analysis: 1, split: 2, model: 3, search: 4, metric: 5, llm_post: 6, comparison: 7, output: 8 };
+  const colCounts = {};
+  nodes.forEach(n => {
+    const col = colMap[n.type] || 0;
+    if (!colCounts[col]) colCounts[col] = 0;
+    n.x = col * 250;
+    n.y = colCounts[col] * 130;
+    colCounts[col]++;
+  });
+  renderCanvas();
+  addLog('已自动排列');
 }
 
-// ── Tab 切换 ─────────────────────────────────────────
-function switchTab(tab) {
-  const console = document.getElementById('consolePanel');
-  const chat = document.getElementById('chatPanel');
-  const code = document.getElementById('codePanel');
-  const tabs = ['tabConsole', 'tabChat', 'tabCode'];
-  tabs.forEach(t => document.getElementById(t).classList.remove('active'));
-  [console, chat, code].forEach(p => { if(p) p.style.display = 'none'; });
-  if (tab === 'console') {
-    console.style.display = 'flex';
-    document.getElementById('tabConsole').classList.add('active');
-  } else if (tab === 'chat') {
-    chat.style.display = 'flex';
-    document.getElementById('tabChat').classList.add('active');
-  } else if (tab === 'code') {
-    code.style.display = 'flex';
-    document.getElementById('tabCode').classList.add('active');
-    if (!codeLoaded) loadFileList();
-  }
-}
-
-function sendSuggestion(text) {
-  document.getElementById('chatInput').value = text;
-  sendChat();
-}
-
-function onChatKey(e) {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    sendChat();
-  }
-}
-
-function autoResize(el) {
-  el.style.height = 'auto';
-  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
-}
-
-async function sendChat() {
-  const input = document.getElementById('chatInput');
-  const text = input.value.trim();
-  if (!text) return;
-
-  addChatMessage('user', text);
-  input.value = '';
-  input.style.height = 'auto';
-
-  const cfg = getLLMConfig();
-  const messages = [...chatMessages, { role: 'user', content: text }];
-
-  const body = {
-    messages: messages,
-    provider: cfg.provider,
-    api_key: cfg.api_key,
-    base_url: cfg.base_url,
-    model: cfg.model,
-    include_code: document.getElementById('ctxCode').checked,
-    include_results: document.getElementById('ctxResults').checked,
-  };
-
-  // 创建 AI 消息占位
-  const aiDiv = addChatMessage('ai', '');
-  let aiText = '';
-
-  document.getElementById('btnSend').disabled = true;
-  document.getElementById('btnSend').textContent = '...';
-
-  try {
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      const err = await res.json();
-      aiDiv.querySelector('.bubble').textContent = `❌ ${err.message}`;
-      document.getElementById('btnSend').disabled = false;
-      document.getElementById('btnSend').textContent = '发送';
-      return;
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n\n');
-      buffer = lines.pop();
-
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const data = JSON.parse(line.slice(6));
-        if (data.type === 'chunk') {
-          aiText += data.content;
-          aiDiv.querySelector('.bubble').innerHTML = renderMarkdown(aiText);
-        } else if (data.type === 'done') {
-          chatMessages.push({ role: 'user', content: text });
-          chatMessages.push({ role: 'assistant', content: aiText });
-        }
-      }
-    }
-  } catch (e) {
-    aiDiv.querySelector('.bubble').textContent = `❌ 请求失败: ${e.message}`;
-  }
-
-  document.getElementById('btnSend').disabled = false;
-  document.getElementById('btnSend').textContent = '发送';
-}
-
-function addChatMessage(role, text) {
-  const container = document.getElementById('chatMessages');
-  const div = document.createElement('div');
-  div.className = `chat-msg ${role}`;
-  div.innerHTML = `<div class="bubble">${escapeHTML(text)}</div>`;
-  container.appendChild(div);
-  container.scrollTop = container.scrollHeight;
-  return div;
-}
-
-function renderMarkdown(text) {
-  // 简单 markdown 渲染
-  let html = escapeHTML(text);
-  // 代码块
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (m, lang, code) => `<pre><code>${code}</code></pre>`);
-  // 行内代码
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-  // 加粗
-  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  // 换行
-  html = html.replace(/\n/g, '<br>');
-  return html;
-}
-
-// ── 下载 ────────────────────────────────────────────
-function downloadFile(filename, content, mimeType = 'application/json') {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click();
-  document.body.removeChild(a); URL.revokeObjectURL(url);
-}
-
-function downloadNodes() {
-  if (!nodeData.nodes.length) { addLog('没有数据，请先运行', 'error'); return; }
-  downloadFile(`nodes_${nodeData.run_id || 'export'}.json`, JSON.stringify({ run_id: nodeData.run_id, nodes: nodeData.nodes, edges: nodeData.edges }, null, 2));
-  addLog('已下载 nodes.json', 'success');
-}
-
-function downloadResult() {
-  if (!lastResult) { addLog('没有结果，请先运行', 'error'); return; }
-  downloadFile(`result_${lastResult.run_id || 'export'}.json`, JSON.stringify(lastResult, null, 2));
-  addLog('已下载完整结果', 'success');
-}
-
-// ── 日志 ────────────────────────────────────────────
 function addLog(text, level = '') {
   const panel = document.getElementById('logPanel');
   const line = document.createElement('div');
@@ -808,33 +1014,13 @@ function addLog(text, level = '') {
 }
 
 function clearLog() {
-  document.getElementById('logPanel').innerHTML = '';
+  document.getElementById('logPanel').innerHTML = '<div class="log-line">日志已清空。</div>';
 }
 
-function setStatus(dotClass, text) {
-  document.getElementById('statusDot').className = `status-dot ${dotClass}`;
+function setStatus(cls, text) {
+  document.getElementById('statusDot').className = `status-dot ${cls}`;
   document.getElementById('statusText').textContent = text;
 }
-
-// ── 历史 ────────────────────────────────────────────
-async function showHistory() {
-  const res = await fetch('/api/history?limit=20');
-  const data = await res.json();
-  const body = document.getElementById('historyBody');
-  body.innerHTML = '';
-  if (!data.runs.length) {
-    body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-light);">暂无记录</td></tr>';
-  } else {
-    data.runs.forEach(r => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${r.run_id}</td><td>${r.dataset_name}</td><td>${r.best_model || '-'}</td><td>${r.timestamp}</td>`;
-      body.appendChild(tr);
-    });
-  }
-  document.getElementById('historyModal').classList.add('show');
-}
-
-function closeHistory() { document.getElementById('historyModal').classList.remove('show'); }
 
 function escapeHTML(str) {
   const d = document.createElement('div');
@@ -842,110 +1028,40 @@ function escapeHTML(str) {
   return d.innerHTML;
 }
 
-let codeLoaded = false;
-let currentCodePath = '';
-let originalCode = '';
-
-// ── 代码面板 ─────────────────────────────────────────
-async function loadFileList() {
-  const res = await fetch('/api/code');
+async function showHistory() {
+  const res = await fetch('/api/history?limit=20');
   const data = await res.json();
-  const list = document.getElementById('fileList');
-  list.innerHTML = '';
-  const groups = {};
-  data.files.forEach(f => {
-    const dir = f.path.includes('/') ? f.path.split('/')[0] : '.';
-    if (!groups[dir]) groups[dir] = [];
-    groups[dir].push(f);
-  });
-  for (const [dir, files] of Object.entries(groups)) {
-    const header = document.createElement('div');
-    header.style.cssText = 'padding:6px 16px;font-size:0.75rem;color:var(--text-light);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;';
-    header.textContent = dir + '/';
-    list.appendChild(header);
-    files.forEach(f => {
-      const item = document.createElement('div');
-      item.style.cssText = 'padding:4px 16px 4px 24px;font-size:0.82rem;cursor:pointer;color:var(--text);transition:background 0.1s;';
-      item.textContent = f.path.split('/').pop();
-      item.onmouseover = () => item.style.background = 'var(--bg)';
-      item.onmouseout = () => item.style.background = '';
-      item.onclick = () => loadCode(f.path);
-      list.appendChild(item);
-    });
+  let msg = '历史记录:\n';
+  if (data.runs.length === 0) msg += '（暂无）';
+  data.runs.forEach(r => { msg += `  ${r.run_id} | ${r.dataset_name} | ${r.best_model||'-'}\n`; });
+  alert(msg);
+}
+
+// 点击画布空白取消选中
+canvas.onclick = (e) => {
+  if (e.target === canvas || e.target.classList.contains('canvas-empty') || e.target.classList.contains('edge-layer')) {
+    selectedNode = null;
+    renderCanvas();
+    renderConfigPanel();
   }
-  codeLoaded = true;
-}
+};
 
-async function loadCode(path) {
-  currentCodePath = path;
-  document.getElementById('codePath').textContent = path;
-  document.getElementById('codeStatus').textContent = '加载中...';
-  const res = await fetch(`/api/code/${path}`);
-  const data = await res.json();
-  if (data.status !== 'success') {
-    document.getElementById('codeStatus').textContent = '加载失败';
-    return;
-  }
-  originalCode = data.content;
-  document.getElementById('codeContent').textContent = data.content;
-  document.getElementById('codeContent').style.display = 'block';
-  document.getElementById('codeEditor').style.display = 'none';
-  document.getElementById('btnEditCode').style.display = 'inline-block';
-  document.getElementById('btnCancelCode').style.display = 'none';
-  document.getElementById('btnSaveCode').style.display = 'none';
-  document.getElementById('codeStatus').textContent = `${data.lines} 行 · ${data.size} 字符`;
-}
+// ════════════════════════════════════════════════════════════
+//  初始化
+// ════════════════════════════════════════════════════════════
+renderNodeLibrary();
 
-function editCode() {
-  const pre = document.getElementById('codeContent');
-  const editor = document.getElementById('codeEditor');
-  editor.value = originalCode;
-  pre.style.display = 'none';
-  editor.style.display = 'block';
-  editor.focus();
-  document.getElementById('btnEditCode').style.display = 'none';
-  document.getElementById('btnCancelCode').style.display = 'inline-block';
-  document.getElementById('btnSaveCode').style.display = 'inline-block';
-  document.getElementById('codeStatus').textContent = '编辑中...';
-}
-
-function cancelEdit() {
-  document.getElementById('codeContent').style.display = 'block';
-  document.getElementById('codeEditor').style.display = 'none';
-  document.getElementById('btnEditCode').style.display = 'inline-block';
-  document.getElementById('btnCancelCode').style.display = 'none';
-  document.getElementById('btnSaveCode').style.display = 'none';
-  document.getElementById('codeStatus').textContent = '已取消';
-}
-
-async function saveCode() {
-  const pre = document.getElementById('codeContent');
-  const editor = document.getElementById('codeEditor');
-  // 如果编辑器可见，用编辑器的值；否则用原始内容
-  const content = editor.style.display !== 'none' ? editor.value : originalCode;
-  if (content === originalCode) {
-    document.getElementById('codeStatus').textContent = '无修改';
-    return;
-  }
-  document.getElementById('codeStatus').textContent = '保存中...';
-  const res = await fetch(`/api/code/${currentCodePath}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
-  });
-  const data = await res.json();
-  if (data.status === 'success') {
-    originalCode = content;
-    pre.textContent = content;
-    pre.style.display = 'block';
-    editor.style.display = 'none';
-    document.getElementById('codeStatus').textContent = `✅ ${data.message}`;
-  } else {
-    document.getElementById('codeStatus').textContent = `❌ ${data.message}`;
-  }
-}
-
-init();
+// 默认添加一组节点
+addNode('dataset', 40, 40);
+addNode('split', 300, 40);
+addNode('model', 560, 40);
+addNode('metric', 820, 40);
+// 自动连线
+edges.push({ source: 'node-1', target: 'node-2' });
+edges.push({ source: 'node-2', target: 'node-3' });
+edges.push({ source: 'node-3', target: 'node-4' });
+renderCanvas();
 </script>
+
 </body>
 </html>
