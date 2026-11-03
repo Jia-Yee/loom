@@ -6,10 +6,11 @@
 <title>Loom — AutoML 控制台</title>
 <style>
   :root {
-    --bg: #f0f0f5; --surface: #ffffff; --text: #1d1d1f; --text-light: #86868b;
+    --bg: #f0f0f5; --surface: #fff; --text: #1d1d1f; --text-light: #86868b;
     --border: #d2d2d7; --accent: #4a7c59; --accent-hover: #3a6349;
     --danger: #ff3b30; --success: #34c759; --warning: #ff9500; --info: #007aff;
     --radius: 10px; --shadow: 0 2px 8px rgba(0,0,0,0.06);
+    --chat-user: #007aff; --chat-ai: #4a7c59;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -23,6 +24,12 @@
   }
   .topbar h1 { font-size: 1.05rem; font-weight: 600; }
   .topbar .spacer { flex: 1; }
+  .tab-switch { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .tab-switch button {
+    padding: 6px 16px; border: none; background: var(--surface); cursor: pointer;
+    font-size: 0.85rem; transition: all 0.15s;
+  }
+  .tab-switch button.active { background: var(--accent); color: white; }
   .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-light); }
   .status-dot.running { background: var(--info); animation: pulse 1s infinite; }
   .status-dot.success { background: var(--success); }
@@ -31,214 +38,248 @@
   .layout { display: flex; flex: 1; overflow: hidden; }
   .sidebar {
     width: 320px; background: var(--surface); border-right: 1px solid var(--border);
-    overflow-y: auto; padding: 16px; flex-shrink: 0;
+    overflow-y: auto; flex-shrink: 0; padding: 16px;
   }
-  .sidebar h2 { font-size: 0.8rem; color: var(--text-light); text-transform: uppercase; margin: 16px 0 8px; letter-spacing: 0.5px; }
-  .sidebar h2:first-child { margin-top: 0; }
-  .sidebar label { display: block; font-size: 0.8rem; color: var(--text-light); margin-bottom: 4px; }
+  .sidebar h3 { font-size: 0.8rem; color: var(--text-light); text-transform: uppercase; margin: 16px 0 8px; letter-spacing: 0.5px; }
+  .sidebar h3:first-child { margin-top: 0; }
+  .sidebar label { display: block; font-size: 0.8rem; margin: 8px 0 4px; color: var(--text-light); }
   .sidebar select, .sidebar input[type="number"], .sidebar input[type="text"], .sidebar input[type="password"] {
-    width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.85rem; background: var(--surface);
+    width: 100%; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.85rem;
   }
-  .sidebar .row { display: flex; gap: 8px; margin-bottom: 8px; }
-  .sidebar .row > div { flex: 1; }
-  .checkbox-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
-  .checkbox-row label { margin: 0; font-size: 0.85rem; color: var(--text); }
+  .sidebar .checkbox-row { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+  .sidebar .checkbox-row label { margin: 0; }
+  .sidebar .model-list { display: flex; flex-direction: column; gap: 4px; }
+  .sidebar .model-item { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+  .sidebar .model-item:hover { background: var(--bg); }
+  .sidebar .model-item input { margin: 0; }
   .btn-run {
     width: 100%; padding: 10px; background: var(--accent); color: white; border: none;
-    border-radius: 8px; font-size: 0.95rem; font-weight: 600; cursor: pointer; margin-top: 12px;
+    border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer; margin-top: 12px;
   }
   .btn-run:hover { background: var(--accent-hover); }
-  .btn-run:disabled { background: var(--text-light); cursor: not-allowed; }
+  .btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-secondary {
+    padding: 6px 12px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; font-size: 0.8rem; cursor: pointer;
+  }
+  .btn-secondary:hover { background: var(--bg); }
+  .btn-test {
+    padding: 6px 12px; background: var(--info); color: white; border: none;
+    border-radius: 6px; font-size: 0.8rem; cursor: pointer; margin-top: 4px;
+  }
+  .btn-test:hover { opacity: 0.85; }
   .content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   .canvas-area { flex: 1; position: relative; overflow: auto; background: var(--bg); }
-  .canvas-toolbar { padding: 8px 12px; display: flex; gap: 8px; border-bottom: 1px solid var(--border); background: var(--surface); }
+  .canvas-toolbar { padding: 8px 16px; display: flex; gap: 8px; border-bottom: 1px solid var(--border); background: var(--surface); }
   .canvas-toolbar button { padding: 4px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); cursor: pointer; font-size: 0.8rem; }
-  .canvas-toolbar button:hover { background: #f0f0f5; }
-  .canvas-inner { position: relative; min-width: 100%; min-height: 100%; }
+  .canvas-toolbar button:hover { background: var(--bg); }
+  .canvas-inner { position: relative; width: 100%; min-height: 100%; }
   .node {
     position: absolute; width: 200px; background: var(--surface); border: 2px solid var(--border);
-    border-radius: 8px; box-shadow: var(--shadow); cursor: move; user-select: none; transition: border-color 0.2s;
+    border-radius: 8px; padding: 10px; box-shadow: var(--shadow); cursor: move; user-select: none;
   }
-  .node.dragging { opacity: 0.8; z-index: 100; }
-  .node.status-success { border-color: var(--success); }
-  .node.status-running { border-color: var(--info); animation: nodePulse 1.5s infinite; }
-  .node.status-failed { border-color: var(--danger); }
-  .node.status-skipped { border-color: var(--text-light); border-style: dashed; opacity: 0.6; }
-  @keyframes nodePulse { 50% { box-shadow: 0 0 12px var(--info); } }
-  .node-header { padding: 6px 10px; font-size: 0.75rem; font-weight: 600; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-  .node-body { padding: 8px 10px; font-size: 0.75rem; line-height: 1.5; }
-  .node-body .field { display: flex; justify-content: space-between; margin-bottom: 2px; }
-  .node-body .field .k { color: var(--text-light); }
-  .node-body .field .v { font-weight: 500; font-variant-numeric: tabular-nums; }
-  .node-body .tag-list { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 4px; }
-  .node-body .tag { padding: 1px 6px; background: #f0f0f5; border-radius: 4px; font-size: 0.7rem; }
-  .node-body .raw-text { white-space: pre-wrap; max-height: 120px; overflow-y: auto; color: var(--text-light); }
-  .node-body .skipped-text { color: var(--text-light); font-style: italic; }
-  .node-badge { font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; color: white; }
-  .badge-success { background: var(--success); }
-  .badge-running { background: var(--info); }
-  .badge-failed { background: var(--danger); }
-  .badge-skipped { background: var(--text-light); }
+  .node.running { border-color: var(--info); animation: pulse 1s infinite; }
+  .node.success { border-color: var(--success); }
+  .node.failed { border-color: var(--danger); }
+  .node.skipped { border-color: var(--text-light); border-style: dashed; opacity: 0.6; }
+  .node-title { font-size: 0.8rem; font-weight: 600; margin-bottom: 4px; }
+  .node-body { font-size: 0.75rem; color: var(--text-light); }
+  .node-body code { background: var(--bg); padding: 1px 4px; border-radius: 3px; font-size: 0.7rem; }
   .edge-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
-  .empty-state { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: var(--text-light); }
-  .empty-state .icon { font-size: 3rem; margin-bottom: 8px; }
-  .log-panel { height: 180px; background: #1e1e1e; color: #e0e0e0; padding: 8px 12px; overflow-y: auto; font-family: "SF Mono", "Fira Code", monospace; font-size: 0.78rem; line-height: 1.6; flex-shrink: 0; }
-  .log-line { white-space: pre-wrap; word-break: break-all; }
+  .log-panel { height: 180px; border-top: 1px solid var(--border); background: #1e1e1e; color: #ddd; padding: 8px 16px; overflow-y: auto; font-family: "SF Mono", Menlo, monospace; font-size: 0.78rem; }
+  .log-line { margin: 2px 0; }
   .log-line.error { color: #ff6b6b; }
   .log-line.success { color: #51cf66; }
   .log-line.warning { color: #ffd43b; }
-  .log-line.step { color: #74c0fc; font-weight: 600; }
-  .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 1000; }
+  .empty-state { text-align: center; padding: 80px 20px; color: var(--text-light); }
+  .empty-state .icon { font-size: 3rem; margin-bottom: 12px; }
+
+  /* Chat 面板 */
+  .chat-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .chat-messages { flex: 1; overflow-y: auto; padding: 16px; }
+  .chat-msg { margin-bottom: 12px; max-width: 80%; }
+  .chat-msg.user { margin-left: auto; }
+  .chat-msg .bubble {
+    padding: 10px 14px; border-radius: 12px; font-size: 0.88rem; line-height: 1.6;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .chat-msg.user .bubble { background: var(--chat-user); color: white; }
+  .chat-msg.ai .bubble { background: var(--surface); border: 1px solid var(--border); }
+  .chat-msg.ai .bubble pre { background: #f6f3ee; padding: 8px; border-radius: 6px; overflow-x: auto; margin: 6px 0; }
+  .chat-msg.ai .bubble code { background: #f6f3ee; padding: 1px 4px; border-radius: 3px; font-size: 0.82rem; }
+  .chat-msg.ai .bubble pre code { background: none; padding: 0; }
+  .chat-input-area { border-top: 1px solid var(--border); padding: 12px 16px; background: var(--surface); }
+  .chat-input-row { display: flex; gap: 8px; align-items: flex-end; }
+  .chat-input-row textarea {
+    flex: 1; resize: none; border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 12px; font-size: 0.88rem; font-family: inherit; min-height: 40px; max-height: 120px;
+  }
+  .chat-input-row button {
+    padding: 8px 16px; background: var(--accent); color: white; border: none;
+    border-radius: 8px; cursor: pointer; font-size: 0.85rem; white-space: nowrap;
+  }
+  .chat-input-row button:disabled { opacity: 0.5; }
+  .chat-context { display: flex; gap: 12px; margin-bottom: 8px; font-size: 0.78rem; color: var(--text-light); }
+  .chat-context label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .chat-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .chat-suggestions button {
+    padding: 4px 10px; border: 1px solid var(--border); border-radius: 12px;
+    background: var(--surface); cursor: pointer; font-size: 0.78rem; color: var(--text-light);
+  }
+  .chat-suggestions button:hover { background: var(--bg); color: var(--text); }
+  .llm-test-result { font-size: 0.78rem; margin-top: 4px; padding: 4px 8px; border-radius: 4px; }
+  .llm-test-result.success { background: #e8f5e9; color: #2e7d32; }
+  .llm-test-result.error { background: #fce4ec; color: #c62828; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 200; }
   .modal-overlay.show { display: flex; }
-  .modal { background: var(--surface); border-radius: 12px; padding: 24px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; }
+  .modal { background: var(--surface); border-radius: 12px; padding: 24px; max-width: 600px; width: 90%; max-height: 70vh; overflow-y: auto; }
   .modal h2 { margin-bottom: 16px; }
-  .modal table { width: 100%; border-collapse: collapse; }
-  .modal th, .modal td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.8rem; }
-  .modal .close-btn { margin-top: 16px; padding: 8px 20px; background: var(--accent); color: white; border: none; border-radius: 8px; cursor: pointer; }
-  .csv-preview { margin-top: 8px; max-height: 200px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
-  .csv-preview table { width: 100%; font-size: 0.75rem; }
-  .csv-preview th, .csv-preview td { padding: 4px 6px; border: 1px solid var(--border); }
-  .data-source-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
-  .data-source-tabs button { flex: 1; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); cursor: pointer; font-size: 0.8rem; }
-  .data-source-tabs button.active { background: var(--accent); color: white; border-color: var(--accent); }
-  .llm-status { padding: 6px 8px; border-radius: 6px; font-size: 0.75rem; margin-bottom: 8px; }
-  .llm-status.configured { background: #e8f5e9; color: #2e7d32; }
-  .llm-status.not-configured { background: #fff3e0; color: #e65100; }
-  .step-progress { padding: 8px 12px; background: var(--surface); border-bottom: 1px solid var(--border); font-size: 0.8rem; display: none; }
-  .step-progress.show { display: block; }
-  .step-progress .step-item { display: inline-flex; align-items: center; gap: 4px; margin-right: 16px; }
-  .step-progress .step-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
-  .step-progress .step-dot.running { background: var(--info); animation: pulse 1s infinite; }
-  .step-progress .step-dot.success { background: var(--success); }
-  .step-progress .step-dot.failed { background: var(--danger); }
-  .step-progress .step-dot.skipped { background: var(--text-light); }
+  .modal table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  .modal th, .modal td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+  .modal .close { margin-top: 16px; text-align: right; }
 </style>
 </head>
 <body>
 
 <div class="topbar">
-  <h1>Loom AutoML</h1>
+  <h1>🌀 Loom</h1>
+  <div class="tab-switch">
+    <button id="tabConsole" class="active" onclick="switchTab('console')">控制台</button>
+    <button id="tabChat" onclick="switchTab('chat')">AI 对话</button>
+  </div>
   <div class="spacer"></div>
-  <span class="status-dot" id="statusDot"></span>
-  <span id="statusText" style="font-size:0.85rem;">就绪</span>
-  <button onclick="showHistory()" style="padding:4px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);cursor:pointer;font-size:0.8rem;">历史</button>
+  <div class="status-dot" id="statusDot"></div>
+  <span id="statusText" style="font-size:0.85rem;color:var(--text-light);">就绪</span>
+  <button class="btn-secondary" onclick="showHistory()">历史</button>
 </div>
-
-<div class="step-progress" id="stepProgress"></div>
 
 <div class="layout">
   <!-- 左侧配置 -->
   <div class="sidebar">
-    <h2>数据源</h2>
-    <div class="data-source-tabs">
-      <button id="tabPreset" class="active" onclick="switchTab('preset')">内置数据集</button>
-      <button id="tabCsv" onclick="switchTab('csv')">上传 CSV</button>
+    <h3>数据集</h3>
+    <select id="datasetSelect" onchange="onDatasetChange()"></select>
+
+    <h3>上传 CSV</h3>
+    <input type="file" id="csvFile" accept=".csv" onchange="uploadCSV(this)">
+    <div id="csvConfig" style="display:none;margin-top:8px;">
+      <label>目标列</label>
+      <select id="csvTargetCol"></select>
+      <label>任务类型</label>
+      <select id="csvTaskType">
+        <option value="regression">回归</option>
+        <option value="classification">分类</option>
+      </select>
+      <button class="btn-secondary" style="width:100%;margin-top:6px;" onclick="registerCSV()">注册数据集</button>
     </div>
 
-    <div id="presetPanel">
-      <label>选择数据集</label>
-      <select id="datasetSelect"></select>
-    </div>
+    <h3>模型（可多选）</h3>
+    <div class="model-list" id="modelList"></div>
 
-    <div id="csvPanel" style="display:none;">
-      <label>上传 CSV 文件</label>
-      <input type="file" id="csvFile" accept=".csv" style="font-size:0.8rem;margin-bottom:8px;" />
-      <div id="csvResult"></div>
-      <div id="csvConfig" style="display:none;">
-        <label>数据集名称</label>
-        <input type="text" id="csvName" placeholder="my_data" style="margin-bottom:8px;" />
-        <label>目标列</label>
-        <select id="csvTargetCol" style="margin-bottom:8px;"></select>
-        <label>任务类型</label>
-        <select id="csvTaskType" style="margin-bottom:8px;">
-          <option value="regression">回归</option>
-          <option value="classification">分类</option>
-        </select>
-      </div>
-    </div>
-
-    <h2>模型</h2>
-    <div id="modelCheckboxes"></div>
-
-    <h2>运行参数</h2>
-    <div class="row">
-      <div><label>测试集比例</label><input type="number" id="testSize" value="0.2" step="0.05" min="0.05" max="0.5" /></div>
-      <div><label>随机种子</label><input type="number" id="seed" value="42" /></div>
-    </div>
+    <h3>运行参数</h3>
+    <label>测试集比例</label>
+    <input type="number" id="testSize" value="0.2" step="0.05" min="0.05" max="0.5">
+    <label>随机种子</label>
+    <input type="number" id="seed" value="42">
 
     <div class="checkbox-row">
-      <input type="checkbox" id="selectBest" />
-      <label for="selectBest">自动选优（生成对比节点）</label>
+      <input type="checkbox" id="selectBest">
+      <label for="selectBest">自动选优</label>
     </div>
-
     <div class="checkbox-row">
-      <input type="checkbox" id="searchEnabled" />
+      <input type="checkbox" id="searchEnabled" onchange="document.getElementById('searchParams').style.display=this.checked?'block':'none'">
       <label for="searchEnabled">超参搜索</label>
     </div>
-    <div id="searchParams" style="display:none;margin-left:20px;margin-bottom:8px;">
-      <div class="row">
-        <div><label>迭代次数</label><input type="number" id="nIter" value="10" /></div>
-        <div><label>交叉验证折数</label><input type="number" id="cv" value="5" /></div>
-      </div>
+    <div id="searchParams" style="display:none;">
+      <label>搜索次数</label>
+      <input type="number" id="nIter" value="10" min="1">
+      <label>交叉验证折数</label>
+      <input type="number" id="cv" value="5" min="2">
     </div>
-
     <label>LLM 解读范围</label>
-    <select id="llmPostScope" style="margin-bottom:8px;">
+    <select id="llmPostScope">
       <option value="all">全部模型</option>
-      <option value="best">仅最优模型</option>
+      <option value="best">仅最优</option>
     </select>
 
-    <h2>LLM 配置</h2>
-    <div class="llm-status" id="llmStatus"></div>
+    <button class="btn-run" id="btnRun" onclick="runPipeline()">▶ 运行流水线</button>
+
+    <h3>LLM 配置</h3>
     <label>Provider</label>
-    <select id="llmProvider" style="margin-bottom:8px;">
-      <option value="">不使用 LLM</option>
+    <select id="llmProvider" onchange="onLLMProviderChange()">
+      <option value="">未配置</option>
       <option value="deepseek">DeepSeek</option>
-      <option value="ollama">Ollama（本地）</option>
+      <option value="ollama">Ollama (本地)</option>
     </select>
-    <label>API Key（DeepSeek 需要，Ollama 随意填）</label>
-    <input type="password" id="llmApiKey" placeholder="sk-..." style="margin-bottom:8px;" />
-    <label>Base URL（可选，覆盖默认）</label>
-    <input type="text" id="llmBaseUrl" placeholder="自动" style="margin-bottom:8px;" />
+    <label>API Key</label>
+    <input type="password" id="llmApiKey" placeholder="DeepSeek 需要，Ollama 填占位符">
+    <label>Base URL（留空用默认）</label>
+    <input type="text" id="llmBaseUrl" placeholder="自动">
     <label>模型名</label>
-    <input type="text" id="llmModel" placeholder="如 qwen3.5:4b" style="margin-bottom:8px;" />
-    <label>超时（秒）</label>
-    <input type="number" id="llmTimeout" value="60" style="margin-bottom:8px;" />
-
-    <button class="btn-run" id="runBtn" onclick="runPipeline()">▶ 运行流水线</button>
+    <input type="text" id="llmModel" placeholder="如 deepseek-chat / qwen3.5:4b">
+    <button class="btn-test" onclick="testLLM()">🔍 测试连接</button>
+    <div id="llmTestResult"></div>
   </div>
 
-  <!-- 右侧画布 + 日志 -->
+  <!-- 右侧内容区 -->
   <div class="content">
-    <div class="canvas-area" id="canvas">
-      <div class="canvas-toolbar">
-        <button onclick="resetLayout()">重置布局</button>
-        <button onclick="downloadNodes()">下载 nodes.json</button>
-        <button onclick="downloadResult()">下载完整结果</button>
+    <!-- 控制台面板 -->
+    <div id="consolePanel" class="content" style="display:flex;">
+      <div class="canvas-area">
+        <div class="canvas-toolbar">
+          <button onclick="resetLayout()">重置布局</button>
+          <button onclick="downloadNodes()">下载 nodes.json</button>
+          <button onclick="downloadResult()">下载完整结果</button>
+        </div>
+        <div class="canvas-inner" id="canvas">
+          <div class="empty-state" id="emptyState">
+            <div class="icon">🌀</div>
+            <div>选择模型和数据集，点击「运行流水线」</div>
+          </div>
+          <svg class="edge-layer" id="edgeLayer"></svg>
+        </div>
       </div>
-      <div class="empty-state" id="emptyState">
-        <div class="icon">🌀</div>
-        <div>选择数据源和模型，点击「运行流水线」</div>
-      </div>
-      <div class="canvas-inner" id="canvasInner" style="display:none;">
-        <svg class="edge-layer" id="edgeLayer"></svg>
+      <div class="log-panel" id="logPanel">
+        <div class="log-line">Loom 控制台已就绪。配置参数后点击「运行流水线」。</div>
       </div>
     </div>
-    <div class="log-panel" id="logPanel">
-      <div class="log-line">Loom 控制台已就绪。配置参数后点击「运行流水线」。</div>
+
+    <!-- Chat 面板 -->
+    <div id="chatPanel" style="display:none;flex:1;flex-direction:column;overflow:hidden;">
+      <div class="chat-messages" id="chatMessages">
+        <div class="chat-msg ai">
+          <div class="bubble">你好！我是 Loom AI 助手。可以问我关于代码、模型、数据集、运行结果的任何问题，也可以让我帮你生成训练流程代码。</div>
+        </div>
+      </div>
+      <div class="chat-input-area">
+        <div class="chat-suggestions">
+          <button onclick="sendSuggestion('当前有哪些模型和数据集？')">当前有哪些模型？</button>
+          <button onclick="sendSuggestion('解释一下 runner.py 的流程')">解释 runner.py</button>
+          <button onclick="sendSuggestion('分析最近一次运行结果')">分析运行结果</button>
+          <button onclick="sendSuggestion('帮我写一个用随机森林跑 diabetes 的代码')">生成训练代码</button>
+          <button onclick="sendSuggestion('如何添加一个新模型？')">如何扩展？</button>
+        </div>
+        <div class="chat-context">
+          <label><input type="checkbox" id="ctxCode"> 附带代码</label>
+          <label><input type="checkbox" id="ctxResults" checked> 附带结果</label>
+        </div>
+        <div class="chat-input-row">
+          <textarea id="chatInput" placeholder="输入问题..." rows="1" onkeydown="onChatKey(event)" oninput="autoResize(this)"></textarea>
+          <button id="btnSend" onclick="sendChat()">发送</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
 
 <!-- 历史弹窗 -->
-<div class="modal-overlay" id="historyModal">
+<div class="modal-overlay" id="historyModal" onclick="if(event.target===this)closeHistory()">
   <div class="modal">
     <h2>历史运行</h2>
     <table>
       <thead><tr><th>Run ID</th><th>数据集</th><th>最优模型</th><th>时间</th></tr></thead>
       <tbody id="historyBody"></tbody>
     </table>
-    <button class="close-btn" onclick="closeHistory()">关闭</button>
+    <div class="close"><button class="btn-secondary" onclick="closeHistory()">关闭</button></div>
   </div>
 </div>
 
@@ -246,32 +287,26 @@
 let nodeData = { nodes: [], edges: [] };
 let initialPositions = {};
 let lastResult = null;
-let currentTab = 'preset';
-let csvFilePath = null;
+let chatMessages = [];
+let llmConfig = {};
 
-// ── 初始化 ──────────────────────────────────────────
+// ── 初始化 ───────────────────────────────────────────
 async function init() {
   await loadModels();
   await loadDatasets();
   await loadLLMConfig();
-  document.getElementById('searchEnabled').onchange = function() {
-    document.getElementById('searchParams').style.display = this.checked ? 'block' : 'none';
-  };
 }
 
 async function loadModels() {
   const res = await fetch('/api/models');
   const data = await res.json();
-  const container = document.getElementById('modelCheckboxes');
-  container.innerHTML = '';
+  const list = document.getElementById('modelList');
+  list.innerHTML = '';
   data.models.forEach(m => {
-    const lbl = document.createElement('label');
-    lbl.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:0.85rem;color:var(--text);margin-bottom:4px;cursor:pointer;';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox'; cb.value = m; cb.id = `model_${m}`;
-    if (m === 'linear_regression') cb.checked = true;
-    lbl.appendChild(cb); lbl.appendChild(document.createTextNode(m));
-    container.appendChild(lbl);
+    const div = document.createElement('div');
+    div.className = 'model-item';
+    div.innerHTML = `<input type="checkbox" value="${m}" id="model-${m}" checked><label for="model-${m}">${m}</label>`;
+    list.appendChild(div);
   });
 }
 
@@ -290,40 +325,32 @@ async function loadDatasets() {
 async function loadLLMConfig() {
   const res = await fetch('/api/config');
   const data = await res.json();
-  updateLLMStatus(data);
+  llmConfig = data;
+  if (data.provider) document.getElementById('llmProvider').value = data.provider;
+  if (data.model) document.getElementById('llmModel').value = data.model;
+  if (data.base_url) document.getElementById('llmBaseUrl').value = data.base_url;
 }
 
-function updateLLMStatus(cfg) {
-  const el = document.getElementById('llmStatus');
-  if (cfg.provider) {
-    el.className = 'llm-status configured';
-    el.textContent = `✓ ${cfg.provider} 已配置 (模型: ${cfg.model || '默认'})`;
-  } else {
-    el.className = 'llm-status not-configured';
-    el.textContent = '⚠ 未配置 LLM（训练评估正常，LLM 分析将跳过）';
+function onDatasetChange() {}
+function onLLMProviderChange() {
+  const p = document.getElementById('llmProvider').value;
+  if (p === 'ollama') {
+    if (!document.getElementById('llmModel').value) document.getElementById('llmModel').value = 'qwen3.5:4b';
+    if (!document.getElementById('llmApiKey').value) document.getElementById('llmApiKey').value = 'placeholder';
+  } else if (p === 'deepseek') {
+    if (!document.getElementById('llmModel').value) document.getElementById('llmModel').value = 'deepseek-chat';
   }
 }
 
-// ── 数据源切换 ──────────────────────────────────────
-function switchTab(tab) {
-  currentTab = tab;
-  document.getElementById('tabPreset').classList.toggle('active', tab === 'preset');
-  document.getElementById('tabCsv').classList.toggle('active', tab === 'csv');
-  document.getElementById('presetPanel').style.display = tab === 'preset' ? 'block' : 'none';
-  document.getElementById('csvPanel').style.display = tab === 'csv' ? 'block' : 'none';
-}
-
-// ── CSV 上传 ────────────────────────────────────────
-document.getElementById('csvFile').addEventListener('change', async function(e) {
-  const file = e.target.files[0];
+// ── CSV 上传 ─────────────────────────────────────────
+async function uploadCSV(input) {
+  const file = input.files[0];
   if (!file) return;
   const formData = new FormData();
   formData.append('file', file);
   const res = await fetch('/api/upload_csv', { method: 'POST', body: formData });
   const data = await res.json();
   if (data.status === 'success') {
-    csvFilePath = data.filepath;
-    document.getElementById('csvResult').innerHTML = `<div style="font-size:0.8rem;color:var(--success);">✓ ${data.n_rows} 行, ${data.columns.length} 列</div>`;
     document.getElementById('csvConfig').style.display = 'block';
     const sel = document.getElementById('csvTargetCol');
     sel.innerHTML = '';
@@ -332,68 +359,76 @@ document.getElementById('csvFile').addEventListener('change', async function(e) 
       opt.value = c; opt.textContent = c;
       sel.appendChild(opt);
     });
-    // 预览
-    let previewHTML = '<div class="csv-preview"><table><thead><tr>';
-    data.columns.forEach(c => previewHTML += `<th>${escapeHTML(c)}</th>`);
-    previewHTML += '</tr></thead><tbody>';
-    data.preview.forEach(row => {
-      previewHTML += '<tr>';
-      data.columns.forEach(c => previewHTML += `<td>${escapeHTML(String(row[c]))}</td>`);
-      previewHTML += '</tr>';
-    });
-    previewHTML += '</tbody></table></div>';
-    document.getElementById('csvResult').innerHTML += previewHTML;
+    addLog(`CSV 上传成功：${data.n_rows} 行 × ${data.columns.length} 列`, 'success');
   } else {
-    document.getElementById('csvResult').innerHTML = `<div style="color:var(--danger);">${data.message}</div>`;
+    addLog(`CSV 上传失败: ${data.message}`, 'error');
   }
-});
+}
 
-// ── 运行流水线（SSE 流式）────────────────────────────
+async function registerCSV() {
+  const fileInput = document.getElementById('csvFile');
+  const targetCol = document.getElementById('csvTargetCol').value;
+  const taskType = document.getElementById('csvTaskType').value;
+  if (!fileInput.files[0] || !targetCol) { addLog('请先上传 CSV 并选择目标列', 'error'); return; }
+  const formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+  formData.append('target_column', targetCol);
+  formData.append('task_type', taskType);
+  formData.append('name', fileInput.files[0].name.replace('.csv', ''));
+  const res = await fetch('/api/register_csv', { method: 'POST', body: formData });
+  const data = await res.json();
+  if (data.status === 'success') {
+    addLog(`CSV 数据集已注册: ${data.name}`, 'success');
+    await loadDatasets();
+    document.getElementById('datasetSelect').value = data.name;
+  } else {
+    addLog(`注册失败: ${data.message}`, 'error');
+  }
+}
+
+// ── 运行流水线 ───────────────────────────────────────
+function getLLMConfig() {
+  return {
+    provider: document.getElementById('llmProvider').value,
+    api_key: document.getElementById('llmApiKey').value,
+    base_url: document.getElementById('llmBaseUrl').value,
+    model: document.getElementById('llmModel').value,
+  };
+}
+
 async function runPipeline() {
-  const models = Array.from(document.querySelectorAll('#modelCheckboxes input:checked')).map(cb => cb.value);
+  const models = Array.from(document.querySelectorAll('.model-item input:checked')).map(cb => cb.value);
+  const dataset = document.getElementById('datasetSelect').value;
   if (models.length === 0) { addLog('请至少选择一个模型', 'error'); return; }
+  if (!dataset) { addLog('请选择数据集', 'error'); return; }
 
-  const payload = {
+  document.getElementById('btnRun').disabled = true;
+  document.getElementById('btnRun').textContent = '运行中...';
+  clearLog();
+  setStatus('running', '运行中');
+  addLog(`启动流水线：模型=${models}，数据集=${dataset}`, '');
+
+  // 先渲染空画布
+  document.getElementById('emptyState').style.display = 'none';
+
+  const body = {
     model_names: models,
+    dataset_name: dataset,
     test_size: parseFloat(document.getElementById('testSize').value),
     seed: parseInt(document.getElementById('seed').value),
     select_best: document.getElementById('selectBest').checked,
     llm_post_scope: document.getElementById('llmPostScope').value,
     search: document.getElementById('searchEnabled').checked,
-    n_iter: parseInt(document.getElementById('nIter').value) || 10,
-    cv: parseInt(document.getElementById('cv').value) || 5,
-    llm_provider: document.getElementById('llmProvider').value,
-    llm_api_key: document.getElementById('llmApiKey').value,
-    llm_base_url: document.getElementById('llmBaseUrl').value,
-    llm_model: document.getElementById('llmModel').value,
-    llm_timeout: document.getElementById('llmTimeout').value,
+    n_iter: parseInt(document.getElementById('nIter').value),
+    cv: parseInt(document.getElementById('cv').value),
+    llm_config: getLLMConfig(),
   };
-
-  // 数据源
-  if (currentTab === 'preset') {
-    payload.dataset_name = document.getElementById('datasetSelect').value;
-  } else {
-    if (!csvFilePath) { addLog('请先上传 CSV 文件', 'error'); return; }
-    payload.csv_config = {
-      name: document.getElementById('csvName').value || 'csv_data',
-      filepath: csvFilePath,
-      target_column: document.getElementById('csvTargetCol').value,
-      task_type: document.getElementById('csvTaskType').value,
-    };
-  }
-
-  document.getElementById('runBtn').disabled = true;
-  document.getElementById('runBtn').textContent = '运行中...';
-  setStatus('running', '运行中');
-  clearLog();
-  clearCanvas();
-  showStepProgress(['加载数据', 'LLM 分析', '训练', '评估', 'LLM 解读']);
 
   try {
     const res = await fetch('/api/run_stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
 
     const reader = res.body.getReader();
@@ -404,202 +439,112 @@ async function runPipeline() {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
+      const lines = buffer.split('\n\n');
       buffer = lines.pop();
+
       for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const evt = JSON.parse(line.slice(6));
-          handleSSEEvent(evt);
+        if (!line.startsWith('data: ')) continue;
+        const data = JSON.parse(line.slice(6));
+
+        if (data.type === 'step') {
+          const statusIcon = { running: '⏳', success: '✅', failed: '❌', skipped: '⏭️' }[data.status] || '⏳';
+          addLog(`${statusIcon} [${data.step}] ${data.message}`, data.status === 'failed' ? 'error' : data.status === 'success' ? 'success' : '');
+        } else if (data.type === 'done') {
+          nodeData = { nodes: data.nodes, edges: data.edges, run_id: data.run_id };
+          lastResult = data;
+          initialPositions = {};
+          data.nodes.forEach(n => { initialPositions[n.id] = { ...n.position }; });
+          renderCanvas();
+          setStatus('success', '完成');
+          addLog(`\n✅ 流水线完成！run_id=${data.run_id}`, 'success');
+          if (data.best_model) addLog(`⭐ 最优模型: ${data.best_model}`, 'success');
+          for (const [name, m] of Object.entries(data.metrics)) {
+            const metricsStr = Object.entries(m).map(([k,v]) => `${k}=${v.toFixed(4)}`).join('  ');
+            addLog(`  ${name}: ${metricsStr}`, '');
+          }
+        } else if (data.type === 'error') {
+          addLog(`❌ ${data.message}`, 'error');
+          setStatus('error', '错误');
+          if (data.log) data.log.split('\n').forEach(l => { if (l.trim()) addLog(l, 'error'); });
         }
       }
     }
   } catch (e) {
-    addLog(`请求失败: ${e.message}`, 'error');
+    addLog(`❌ 请求失败: ${e.message}`, 'error');
     setStatus('error', '错误');
   }
 
-  document.getElementById('runBtn').disabled = false;
-  document.getElementById('runBtn').textContent = '▶ 运行流水线';
+  document.getElementById('btnRun').disabled = false;
+  document.getElementById('btnRun').textContent = '▶ 运行流水线';
 }
 
-function handleSSEEvent(evt) {
-  if (evt.type === 'step') {
-    addLog(`[${evt.step}] ${evt.status}: ${evt.message}`, 'step');
-    updateStepProgress(evt.step, evt.status);
-  } else if (evt.type === 'done') {
-    lastResult = evt;
-    nodeData = { nodes: evt.nodes, edges: evt.edges, run_id: evt.run_id };
-    initialPositions = {};
-    evt.nodes.forEach(n => { initialPositions[n.id] = { ...n.position }; });
-    renderCanvas();
-    setStatus('success', '完成');
-    addLog(`\n评估指标:`, 'success');
-    for (const [model, m] of Object.entries(evt.metrics)) {
-      const s = Object.entries(m).map(([k,v]) => `${k}=${typeof v === 'number' ? v.toFixed(4) : v}`).join('  ');
-      addLog(`  ${model}: ${s}`);
-    }
-    if (evt.best_model) addLog(`\n⭐ 最优模型: ${evt.best_model}`, 'success');
-    hideStepProgress();
-  } else if (evt.type === 'error') {
-    addLog(`错误: ${evt.message}`, 'error');
-    setStatus('error', '错误');
-    hideStepProgress();
-  }
-}
-
-// ── 步骤进度条 ──────────────────────────────────────
-const STEP_MAP = {
-  'dataset': '加载数据', 'llm_pre': 'LLM 分析', 'train': '训练',
-  'metric': '评估', 'llm_post': 'LLM 解读', 'done': '完成',
-};
-
-function showStepProgress(steps) {
-  const el = document.getElementById('stepProgress');
-  el.innerHTML = steps.map((s, i) =>
-    `<span class="step-item" id="stepItem_${i}"><span class="step-dot" id="stepDot_${i}"></span>${s}</span>`
-  ).join('');
-  el.classList.add('show');
-}
-
-function updateStepProgress(step, status) {
-  const stepName = STEP_MAP[step] || step;
-  const items = document.querySelectorAll('.step-progress .step-item');
-  items.forEach(item => {
-    if (item.textContent.includes(stepName)) {
-      const dot = item.querySelector('.step-dot');
-      dot.className = `step-dot ${status}`;
-    }
-  });
-}
-
-function hideStepProgress() {
-  // 保留显示，不隐藏
-}
-
-// ── 画布渲染 ────────────────────────────────────────
-function clearCanvas() {
-  document.getElementById('canvasInner').style.display = 'none';
-  document.getElementById('emptyState').style.display = 'block';
-  nodeData = { nodes: [], edges: [] };
-}
-
+// ── 画布渲染 ─────────────────────────────────────────
 function renderCanvas() {
-  const inner = document.getElementById('canvasInner');
-  const empty = document.getElementById('emptyState');
-  if (!nodeData.nodes || nodeData.nodes.length === 0) {
-    inner.style.display = 'none';
-    empty.style.display = 'block';
-    return;
-  }
-  inner.style.display = 'block';
-  empty.style.display = 'none';
-
-  // 清除旧节点
-  inner.querySelectorAll('.node').forEach(n => n.remove());
-
+  const canvas = document.getElementById('canvas');
+  document.getElementById('emptyState').style.display = 'none';
+  canvas.querySelectorAll('.node').forEach(n => n.remove());
   nodeData.nodes.forEach(node => {
     const el = document.createElement('div');
-    el.className = `node status-${node.status}`;
+    el.className = `node ${node.status}`;
     el.style.left = `${node.position.x}px`;
     el.style.top = `${node.position.y}px`;
     el.id = `node-${node.id}`;
-
-    let bodyHTML = '';
+    let body = '';
     const d = node.display || {};
     switch (node.type) {
       case 'dataset':
-        bodyHTML = `<div class="field"><span class="k">样本数</span><span class="v">${d.n_samples ?? '-'}</span></div>
-                    <div class="field"><span class="k">特征数</span><span class="v">${d.n_features ?? '-'}</span></div>
-                    <div class="field"><span class="k">任务类型</span><span class="v">${d.task_type ?? '-'}</span></div>`;
-        if (d.feature_names && d.feature_names.length > 0) {
-          bodyHTML += `<div class="tag-list">${d.feature_names.map(f => `<span class="tag">${escapeHTML(f)}</span>`).join('')}</div>`;
-        }
+        body = `<div>${d.n_samples} 样本 × ${d.n_features} 特征</div><div style="font-size:0.7rem;margin-top:2px;">${(d.feature_names||[]).slice(0,3).join(', ')}...</div>`;
         break;
       case 'model':
-        bodyHTML = `<div class="field"><span class="k">模型</span><span class="v">${escapeHTML(d.model_name)}</span></div>`;
-        if (d.params) {
-          Object.entries(d.params).forEach(([k, v]) => {
-            if (v !== null && v !== undefined && typeof v !== 'object') {
-              bodyHTML += `<div class="field"><span class="k">${escapeHTML(k)}</span><span class="v">${escapeHTML(String(v))}</span></div>`;
-            }
-          });
-        }
-        if (d.search_info && d.search_info.enabled) {
-          bodyHTML += `<div class="field"><span class="k">搜索得分</span><span class="v">${d.search_info.best_score?.toFixed(4)}</span></div>`;
-        }
+        body = `<div>${d.model_name}</div>`;
         break;
       case 'metric':
-        Object.entries(d).forEach(([k, v]) => {
-          if (k !== 'model_name' && typeof v === 'number') {
-            bodyHTML += `<div class="field"><span class="k">${k}</span><span class="v">${v.toFixed(4)}</span></div>`;
-          }
-        });
+        body = Object.entries(d).filter(([k]) => k !== 'model_name').map(([k,v]) => `${k}: ${typeof v === 'number' ? v.toFixed(4) : v}`).join('<br>');
         break;
       case 'llm_analysis':
-        if (node.status === 'skipped') {
-          bodyHTML = `<div class="skipped-text">已跳过</div>`;
-        } else if (d.structured) {
-          bodyHTML += `<div class="raw-text">${escapeHTML(JSON.stringify(d.structured, null, 2))}</div>`;
-        } else if (d.content) {
-          bodyHTML += `<div class="raw-text">${escapeHTML(d.content)}</div>`;
-        } else {
-          bodyHTML = `<div class="skipped-text">等待中...</div>`;
-        }
+        if (d.structured) body = `<pre style="font-size:0.65rem;">${escapeHTML(JSON.stringify(d.structured, null, 2))}</pre>`;
+        else if (d.content) body = `<div style="max-height:80px;overflow-y:auto;">${escapeHTML(d.content).slice(0,200)}...</div>`;
+        else body = '<i>已跳过</i>';
         break;
       case 'comparison':
-        if (d.models) {
-          d.models.forEach(m => {
-            const star = m.is_best ? '⭐' : '';
-            bodyHTML += `<div class="field"><span class="k">${star} ${escapeHTML(m.model_name)}</span><span class="v">R²=${m.r2?.toFixed(4)}</span></div>`;
-          });
-        }
+        body = (d.models||[]).map(m => `${m.model_name}: ${m.is_best ? '⭐' : ''} r2=${(m.r2||0).toFixed(4)}`).join('<br>');
         break;
       case 'config':
-        Object.entries(d).forEach(([k, v]) => {
-          bodyHTML += `<div class="field"><span class="k">${escapeHTML(k)}</span><span class="v">${escapeHTML(String(v))}</span></div>`;
-        });
+        body = Object.entries(d).map(([k,v]) => `${k}: ${v}`).join('<br>');
         break;
     }
-
-    el.innerHTML = `
-      <div class="node-header">
-        <span>${escapeHTML(node.label)}</span>
-        <span class="node-badge badge-${node.status}">${node.status}</span>
-      </div>
-      <div class="node-body">${bodyHTML}</div>
-    `;
-
+    el.innerHTML = `<div class="node-title">${node.label}</div><div class="node-body">${body}</div>`;
     makeDraggable(el, node);
-    inner.appendChild(el);
+    canvas.appendChild(el);
   });
-
   renderEdges();
 }
 
 function renderEdges() {
   const svg = document.getElementById('edgeLayer');
-  const inner = document.getElementById('canvasInner');
   svg.innerHTML = '';
-  svg.setAttribute('width', inner.scrollWidth);
-  svg.setAttribute('height', inner.scrollHeight);
-
-  if (!nodeData.edges) return;
+  const canvas = document.getElementById('canvas');
+  const rect = canvas.getBoundingClientRect();
+  svg.setAttribute('width', rect.width);
+  svg.setAttribute('height', Math.max(rect.height, 500));
   nodeData.edges.forEach(edge => {
-    const src = document.getElementById(`node-${edge.source}`);
-    const tgt = document.getElementById(`node-${edge.target}`);
-    if (!src || !tgt) return;
-    const x1 = src.offsetLeft + src.offsetWidth / 2;
-    const y1 = src.offsetTop + src.offsetHeight;
-    const x2 = tgt.offsetLeft + tgt.offsetWidth / 2;
-    const y2 = tgt.offsetTop;
-    const midY = (y1 + y2) / 2;
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('d', `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`);
-    path.setAttribute('stroke', '#86868b');
-    path.setAttribute('stroke-width', '1.5');
-    path.setAttribute('fill', 'none');
-    svg.appendChild(path);
+    const s = document.getElementById(`node-${edge.source}`);
+    const t = document.getElementById(`node-${edge.target}`);
+    if (!s || !t) return;
+    const x1 = s.offsetLeft + s.offsetWidth / 2;
+    const y1 = s.offsetTop + s.offsetHeight / 2;
+    const x2 = t.offsetLeft + t.offsetWidth / 2;
+    const y2 = t.offsetTop + t.offsetHeight / 2;
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+    line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+    line.setAttribute('stroke', '#ccc'); line.setAttribute('stroke-width', '2');
+    line.setAttribute('marker-end', 'url(#arrowhead)');
+    svg.appendChild(line);
   });
+  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  defs.innerHTML = '<marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#ccc"/></marker>';
+  svg.appendChild(defs);
 }
 
 function makeDraggable(el, node) {
@@ -623,21 +568,172 @@ function makeDraggable(el, node) {
   });
 }
 
-// ── 工具函数 ────────────────────────────────────────
 function resetLayout() {
-  nodeData.nodes.forEach(n => {
-    if (initialPositions[n.id]) n.position = { ...initialPositions[n.id] };
-  });
+  nodeData.nodes.forEach(n => { if (initialPositions[n.id]) n.position = { ...initialPositions[n.id] }; });
   renderCanvas();
 }
 
+// ── LLM 测试 ────────────────────────────────────────
+async function testLLM() {
+  const result = document.getElementById('llmTestResult');
+  result.innerHTML = '<div class="llm-test-result">测试中...</div>';
+  const cfg = getLLMConfig();
+  try {
+    const res = await fetch('/api/llm_test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...cfg, timeout: 15 }),
+    });
+    const data = await res.json();
+    if (data.status === 'success') {
+      result.innerHTML = `<div class="llm-test-result success">✅ ${data.message}</div>`;
+    } else {
+      result.innerHTML = `<div class="llm-test-result error">❌ ${data.message}</div>`;
+    }
+  } catch (e) {
+    result.innerHTML = `<div class="llm-test-result error">❌ ${e.message}</div>`;
+  }
+}
+
+// ── Chat ────────────────────────────────────────────
+function switchTab(tab) {
+  const console = document.getElementById('consolePanel');
+  const chat = document.getElementById('chatPanel');
+  const tabConsole = document.getElementById('tabConsole');
+  const tabChat = document.getElementById('tabChat');
+  if (tab === 'console') {
+    console.style.display = 'flex'; chat.style.display = 'none';
+    tabConsole.classList.add('active'); tabChat.classList.remove('active');
+  } else {
+    console.style.display = 'none'; chat.style.display = 'flex';
+    tabConsole.classList.remove('active'); tabChat.classList.add('active');
+  }
+}
+
+function sendSuggestion(text) {
+  document.getElementById('chatInput').value = text;
+  sendChat();
+}
+
+function onChatKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendChat();
+  }
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+async function sendChat() {
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if (!text) return;
+
+  addChatMessage('user', text);
+  input.value = '';
+  input.style.height = 'auto';
+
+  const cfg = getLLMConfig();
+  const messages = [...chatMessages, { role: 'user', content: text }];
+
+  const body = {
+    messages: messages,
+    provider: cfg.provider,
+    api_key: cfg.api_key,
+    base_url: cfg.base_url,
+    model: cfg.model,
+    include_code: document.getElementById('ctxCode').checked,
+    include_results: document.getElementById('ctxResults').checked,
+  };
+
+  // 创建 AI 消息占位
+  const aiDiv = addChatMessage('ai', '');
+  let aiText = '';
+
+  document.getElementById('btnSend').disabled = true;
+  document.getElementById('btnSend').textContent = '...';
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      aiDiv.querySelector('.bubble').textContent = `❌ ${err.message}`;
+      document.getElementById('btnSend').disabled = false;
+      document.getElementById('btnSend').textContent = '发送';
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = JSON.parse(line.slice(6));
+        if (data.type === 'chunk') {
+          aiText += data.content;
+          aiDiv.querySelector('.bubble').innerHTML = renderMarkdown(aiText);
+        } else if (data.type === 'done') {
+          chatMessages.push({ role: 'user', content: text });
+          chatMessages.push({ role: 'assistant', content: aiText });
+        }
+      }
+    }
+  } catch (e) {
+    aiDiv.querySelector('.bubble').textContent = `❌ 请求失败: ${e.message}`;
+  }
+
+  document.getElementById('btnSend').disabled = false;
+  document.getElementById('btnSend').textContent = '发送';
+}
+
+function addChatMessage(role, text) {
+  const container = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className = `chat-msg ${role}`;
+  div.innerHTML = `<div class="bubble">${escapeHTML(text)}</div>`;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return div;
+}
+
+function renderMarkdown(text) {
+  // 简单 markdown 渲染
+  let html = escapeHTML(text);
+  // 代码块
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (m, lang, code) => `<pre><code>${code}</code></pre>`);
+  // 行内代码
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // 加粗
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  // 换行
+  html = html.replace(/\n/g, '<br>');
+  return html;
+}
+
+// ── 下载 ────────────────────────────────────────────
 function downloadFile(filename, content, mimeType = 'application/json') {
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 
 function downloadNodes() {
@@ -652,6 +748,7 @@ function downloadResult() {
   addLog('已下载完整结果', 'success');
 }
 
+// ── 日志 ────────────────────────────────────────────
 function addLog(text, level = '') {
   const panel = document.getElementById('logPanel');
   const line = document.createElement('div');
@@ -670,12 +767,13 @@ function setStatus(dotClass, text) {
   document.getElementById('statusText').textContent = text;
 }
 
+// ── 历史 ────────────────────────────────────────────
 async function showHistory() {
   const res = await fetch('/api/history?limit=20');
   const data = await res.json();
   const body = document.getElementById('historyBody');
   body.innerHTML = '';
-  if (data.runs.length === 0) {
+  if (!data.runs.length) {
     body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-light);">暂无记录</td></tr>';
   } else {
     data.runs.forEach(r => {

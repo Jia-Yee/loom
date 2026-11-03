@@ -25,6 +25,9 @@ register_csv_dataset = _datasets_mod.register_csv_dataset
 
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), "web"), static_url_path="")
 
+# 全局存储最近一次运行结果，供 chat 引用
+last_result_store = {}
+
 # 存储上传的 CSV 文件路径
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -156,6 +159,7 @@ def api_run_stream():
             if kind == "step":
                 yield f"data: {json.dumps({'type': 'step', **data})}\n\n"
             elif kind == "done":
+                last_result_store["result"] = data
                 yield f"data: {json.dumps({'type': 'done', 'run_id': data['run_id'], 'metrics': data['metrics'], 'best_model': data.get('best_model'), 'nodes': data['nodes'], 'edges': data['edges'], 'log': '\\n'.join(log_lines)})}\n\n"
                 break
             elif kind == "error":
@@ -194,6 +198,169 @@ def api_config():
         "model": os.environ.get("AUTOML_LLM_MODEL", ""),
         "timeout": os.environ.get("AUTOML_LLM_TIMEOUT", "30"),
     })
+
+
+@app.route("/api/llm_test", methods=["POST"])
+def api_llm_test():
+    """测试 LLM 连通性。"""
+    data = request.json or {}
+    provider = data.get("provider", "").strip().lower()
+    api_key = data.get("api_key", "").strip()
+    base_url = data.get("base_url", "").strip()
+    model = data.get("model", "").strip()
+    timeout = int(data.get("timeout", 30))
+
+    if not provider:
+        return jsonify({"status": "error", "message": "未指定 provider"})
+
+    # provider 默认值
+    defaults = {
+        "deepseek": {"base_url": "https://api.deepseek.com", "model": "deepseek-chat"},
+        "ollama": {"base_url": "http://localhost:11434/v1", "model": "qwen2.5:7b"},
+    }
+    if not base_url:
+        base_url = defaults.get(provider, {}).get("base_url", "")
+    if not model:
+        model = defaults.get(provider, {}).get("model", "")
+    if not api_key and provider == "ollama":
+        api_key = "ollama-placeholder"
+    if not api_key and provider == "deepseek":
+        return jsonify({"status": "error", "message": "DeepSeek 需要 API Key"})
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(
+            base_url=base_url,
+            api_key=api_key,
+            timeout=timeout,
+        )
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": "请回复'连接成功'四个字。"}],
+            max_tokens=20,
+        )
+        reply = resp.choices[0].message.content.strip()
+        return jsonify({
+            "status": "success",
+            "message": f"连接成功！模型回复: {reply}",
+            "provider": provider,
+            "model": model,
+            "base_url": base_url,
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"连接失败: {type(e).__name__}: {e}"})
+
+
+@app.route("/api/chat", methods=["POST"])
+def api_chat():
+    """与大模型对话，可附带项目上下文（代码/模型/结果）。"""
+    data = request.json or {}
+    messages = data.get("messages", [])
+    provider = data.get("provider", "").strip().lower()
+    api_key = data.get("api_key", "").strip()
+    base_url = data.get("base_url", "").strip()
+    model = data.get("model", "").strip()
+    timeout = int(data.get("timeout", 60))
+
+    # 注入环境变量（复用 runner 的 LLM 配置）
+    if provider:
+        os.environ["AUTOML_LLM_PROVIDER"] = provider
+    if api_key:
+        os.environ["AUTOML_LLM_API_KEY"] = api_key
+    if base_url:
+        os.environ["AUTOML_LLM_BASE_URL"] = base_url
+    if model:
+        os.environ["AUTOML_LLM_MODEL"] = model
+    if timeout:
+        os.environ["AUTOML_LLM_TIMEOUT"] = str(timeout)
+
+    # 构建系统上下文
+    context_parts = []
+
+    # 是否附带代码上下文
+    include_code = data.get("include_code", False)
+    if include_code:
+        import glob
+        code_files = []
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        for pattern in ["core/*.py", "models/*.py", "datasets/*.py"]:
+            for f in sorted(glob.glob(os.path.join(base_dir, pattern))):
+                rel = os.path.relpath(f, base_dir)
+                try:
+                    with open(f, "r", encoding="utf-8") as fh:
+                        content = fh.read()
+                    code_files.append(f"### {rel}\n```python\n{content}\n```")
+                except Exception:
+                    pass
+        if code_files:
+            context_parts.append("以下是项目代码：\n\n" + "\n\n".join(code_files))
+
+    # 是否附带运行结果
+    include_results = data.get("include_results", False)
+    if include_results and last_result_store.get("result"):
+        r = last_result_store["result"]
+        context_parts.append(
+            f"最近一次运行结果：\nrun_id: {r['run_id']}\n"
+            f"metrics: {json.dumps(r['metrics'], ensure_ascii=False)}\n"
+            f"best_model: {r.get('best_model')}\n"
+            f"nodes: {json.dumps(r['nodes'], ensure_ascii=False)[:3000]}"
+        )
+
+    # 模型与数据集列表
+    context_parts.append(
+        f"可用模型: {list_models()}\n"
+        f"可用数据集: {list_datasets()}"
+    )
+
+    system_prompt = (
+        "你是 Loom AutoML 框架的 AI 助手。你可以：\n"
+        "1. 回答关于项目代码、模型、数据集、运行结果的问题\n"
+        "2. 根据用户需求建议合适的模型和数据集组合\n"
+        "3. 生成 Python 代码片段供用户执行\n"
+        "4. 分析训练结果并给出改进建议\n\n"
+        + "\n\n".join(context_parts)
+    )
+
+    full_messages = [{"role": "system", "content": system_prompt}] + messages
+
+    try:
+        from openai import OpenAI
+        defaults = {
+            "deepseek": {"base_url": "https://api.deepseek.com", "model": "deepseek-chat"},
+            "ollama": {"base_url": "http://localhost:11434/v1", "model": "qwen2.5:7b"},
+        }
+        prov = provider or os.environ.get("AUTOML_LLM_PROVIDER", "").strip().lower()
+        if not base_url:
+            base_url = os.environ.get("AUTOML_LLM_BASE_URL", "") or defaults.get(prov, {}).get("base_url", "")
+        if not model:
+            model = os.environ.get("AUTOML_LLM_MODEL", "") or defaults.get(prov, {}).get("model", "")
+        if not api_key:
+            api_key = os.environ.get("AUTOML_LLM_API_KEY", "")
+        if not api_key and prov == "ollama":
+            api_key = "ollama-placeholder"
+
+        if not prov or not base_url or not model:
+            return jsonify({"status": "error", "message": "LLM 未配置，请先填写 provider / model"})
+
+        client = OpenAI(base_url=base_url, api_key=api_key, timeout=timeout)
+        resp = client.chat.completions.create(
+            model=model,
+            messages=full_messages,
+            max_tokens=4096,
+            stream=True,
+        )
+
+        def generate():
+            for chunk in resp:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    text = chunk.choices[0].delta.content
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': text})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        return Response(generate(), mimetype="text/event-stream")
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"LLM 调用失败: {type(e).__name__}: {e}"}), 500
 
 
 def main():
