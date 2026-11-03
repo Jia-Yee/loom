@@ -421,7 +421,11 @@ async function runPipeline() {
     search: document.getElementById('searchEnabled').checked,
     n_iter: parseInt(document.getElementById('nIter').value),
     cv: parseInt(document.getElementById('cv').value),
-    llm_config: getLLMConfig(),
+    llm_provider: document.getElementById('llmProvider').value,
+    llm_api_key: document.getElementById('llmApiKey').value,
+    llm_base_url: document.getElementById('llmBaseUrl').value,
+    llm_model: document.getElementById('llmModel').value,
+    llm_timeout: document.getElementById('llmTimeout') ? document.getElementById('llmTimeout').value : '',
   };
 
   try {
@@ -483,11 +487,15 @@ function renderCanvas() {
   const canvas = document.getElementById('canvas');
   document.getElementById('emptyState').style.display = 'none';
   canvas.querySelectorAll('.node').forEach(n => n.remove());
+  // 计算垂直偏移，确保节点不会跑到画布顶部之上
+  const ys = nodeData.nodes.map(n => n.position.y);
+  const minY = Math.min(...ys);
+  const yOffset = minY < 0 ? -minY + 40 : 40;
   nodeData.nodes.forEach(node => {
     const el = document.createElement('div');
     el.className = `node ${node.status}`;
     el.style.left = `${node.position.x}px`;
-    el.style.top = `${node.position.y}px`;
+    el.style.top = `${node.position.y + yOffset}px`;
     el.id = `node-${node.id}`;
     let body = '';
     const d = node.display || {};
@@ -556,6 +564,9 @@ function renderEdges() {
 
 function makeDraggable(el, node) {
   let isDragging = false, startX, startY, origX, origY;
+  const ys = nodeData.nodes.map(n => n.position.y);
+  const minY = Math.min(...ys);
+  const yOffset = minY < 0 ? -minY + 40 : 40;
   el.addEventListener('mousedown', e => {
     isDragging = true; el.classList.add('dragging');
     startX = e.clientX; startY = e.clientY;
@@ -567,7 +578,7 @@ function makeDraggable(el, node) {
     node.position.x = origX + (e.clientX - startX);
     node.position.y = origY + (e.clientY - startY);
     el.style.left = `${node.position.x}px`;
-    el.style.top = `${node.position.y}px`;
+    el.style.top = `${node.position.y + yOffset}px`;
     renderEdges();
   });
   document.addEventListener('mouseup', () => {
