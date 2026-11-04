@@ -132,15 +132,19 @@
     width: var(--port-size); height: var(--port-size); border-radius: 50%;
     background: var(--border); border: 2px solid var(--surface); cursor: crosshair;
     position: relative; z-index: 5;
+    transition: background 0.15s, transform 0.15s, box-shadow 0.15s;
   }
-  .port:hover { background: var(--accent); }
+  .port:hover { background: var(--accent); transform: scale(1.3); }
   .port.input { margin-left: -5px; }
   .port.output { margin-right: -5px; }
+  .port.port-active { background: var(--accent); transform: scale(1.4); box-shadow: 0 0 8px var(--accent-glow); }
+  .port.port-hover { background: var(--success); transform: scale(1.4); box-shadow: 0 0 8px var(--success); }
 
   /* SVG 连线层 */
   .edge-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
-  .edge-layer path { fill: none; stroke: var(--text-light); stroke-width: 2; pointer-events: stroke; cursor: pointer; }
+  .edge-layer path { fill: none; stroke: var(--text-light); stroke-width: 2; pointer-events: stroke; cursor: pointer; transition: stroke 0.15s, stroke-width 0.15s; }
   .edge-layer path:hover { stroke: var(--accent); stroke-width: 3; }
+  .edge-layer .edge-hit { stroke: transparent; stroke-width: 16; fill: none; pointer-events: stroke; cursor: pointer; }
 
   /* ── 右栏：参数配置 ─────────────────── */
   .sidebar-right {

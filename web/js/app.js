@@ -136,11 +136,14 @@ const CATEGORIES = {
 //  状态
 // ════════════════════════════════════════════════════════════
 let nodes = [];  // {id, type, x, y, config, status, display}
-let edges = [];  // {source, target}
+let edges = [];  // {source, target, sourcePort, targetPort}
 let selectedNode = null;
+let selectedEdge = null;
 let nodeIdCounter = 0;
 let draggingNode = null;
 let connectingPort = null;
+let connectSource = null;   // 连线拖拽的源节点 ID
+let connectDir = null;      // 连线拖拽的方向 ('output' | 'input')
 
 // ════════════════════════════════════════════════════════════
 //  左栏：节点库渲染
@@ -337,30 +340,55 @@ function startDrag(node, e) {
 // ════════════════════════════════════════════════════════════
 //  画布：连线
 // ════════════════════════════════════════════════════════════
+let edgeIdCounter = 0;
+
 function startConnect(port, e) {
   const nodeId = port.dataset.node;
   const portName = port.dataset.port;
   const dir = port.dataset.dir;
-  if (dir !== 'output') return;  // 只能从输出拉到输入
+  // 允许从 output 或 input 端口开始拖拽
+  connectSource = nodeId;
+  connectDir = dir;
+  port.classList.add('port-active');
 
   const onMove = (e) => {
     renderEdges(e);
+    // 高亮潜在目标端口
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    canvas.querySelectorAll('.port-hover').forEach(p => p.classList.remove('port-hover'));
+    if (el && el.classList.contains('port') && el.dataset.dir !== dir && el.dataset.node !== nodeId) {
+      el.classList.add('port-hover');
+    }
   };
   const onUp = (e) => {
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('mouseup', onUp);
-    // 检查是否落在输入端口上
+    port.classList.remove('port-active');
+    canvas.querySelectorAll('.port-hover').forEach(p => p.classList.remove('port-hover'));
+
     const target = document.elementFromPoint(e.clientX, e.clientY);
-    if (target && target.classList.contains('port') && target.dataset.dir === 'input') {
+    if (target && target.classList.contains('port') && target.dataset.dir !== dir) {
       const targetNode = target.dataset.node;
       if (targetNode !== nodeId) {
+        // 根据拖拽方向确定 source/target
+        let src, tgt;
+        if (dir === 'output') {
+          src = nodeId; tgt = targetNode;
+        } else {
+          src = targetNode; tgt = nodeId;
+        }
         // 避免重复连线
-        if (!edges.some(ed => ed.source === nodeId && ed.target === targetNode)) {
-          edges.push({ source: nodeId, target: targetNode });
-          addLog(`连线: ${nodeId} → ${targetNode}`);
+        if (!edges.some(ed => ed.source === src && ed.target === tgt)) {
+          const edgeId = `edge-${++edgeIdCounter}`;
+          edges.push({ id: edgeId, source: src, target: tgt });
+          addLog(`连线: ${src} → ${tgt}`);
+        } else {
+          addLog(`连线已存在: ${src} → ${tgt}`, 'warning');
         }
       }
     }
+    connectSource = null;
+    connectDir = null;
     renderEdges();
   };
   document.addEventListener('mousemove', onMove);
@@ -370,7 +398,7 @@ function startConnect(port, e) {
 function renderEdges(tempEnd = null) {
   const svg = document.getElementById('edgeLayer');
   // 清除旧路径（保留 defs）
-  svg.querySelectorAll('path').forEach(p => p.remove());
+  svg.querySelectorAll('path, .edge-hit').forEach(p => p.remove());
 
   const rect = canvas.getBoundingClientRect();
   svg.setAttribute('width', rect.width);
@@ -385,24 +413,76 @@ function renderEdges(tempEnd = null) {
     const x2 = t.offsetLeft;
     const y2 = t.offsetTop + t.offsetHeight / 2;
     const mx = (x1 + x2) / 2;
-    svg.appendChild(createPath(x1, y1, mx, y1, mx, y2, x2, y2));
+    const path = createPath(x1, y1, mx, y1, mx, y2, x2, y2);
+
+    // 选中高亮
+    if (selectedEdge === edge.id) {
+      path.setAttribute('stroke', 'var(--danger)');
+      path.setAttribute('stroke-width', '3');
+    }
+    svg.appendChild(path);
+
+    // 不可见的宽点击区域（方便点中连线）
+    const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    hit.setAttribute('d', path.getAttribute('d'));
+    hit.setAttribute('stroke', 'transparent');
+    hit.setAttribute('stroke-width', '16');
+    hit.setAttribute('fill', 'none');
+    hit.style.cursor = 'pointer';
+    hit.classList.add('edge-hit');
+    hit.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      selectEdge(edge.id);
+    });
+    // 双击删除
+    hit.addEventListener('dblclick', (ev) => {
+      ev.stopPropagation();
+      deleteEdge(edge.id);
+    });
+    svg.appendChild(hit);
   });
 
   // 临时连线（拖拽中）
-  if (tempEnd) {
-    const s = document.getElementById(`cn-${selectedNode}`);
+  if (tempEnd && connectSource) {
+    const s = document.getElementById(`cn-${connectSource}`);
     if (s) {
-      const x1 = s.offsetLeft + s.offsetWidth;
+      const isOutput = connectDir === 'output';
+      const x1 = isOutput ? s.offsetLeft + s.offsetWidth : s.offsetLeft;
       const y1 = s.offsetTop + s.offsetHeight / 2;
       const x2 = tempEnd.clientX - rect.left;
       const y2 = tempEnd.clientY - rect.top;
       const mx = (x1 + x2) / 2;
-      const path = createPath(x1, y1, mx, y1, mx, y2, x2, y2);
+      const path = createPath(
+        isOutput ? x1 : x2, isOutput ? y1 : y2,
+        mx, isOutput ? y1 : y2,
+        mx, isOutput ? y2 : y1,
+        isOutput ? x2 : x1, isOutput ? y2 : y1
+      );
       path.setAttribute('stroke-dasharray', '4,4');
       path.setAttribute('opacity', '0.5');
+      path.setAttribute('stroke', 'var(--accent)');
       svg.appendChild(path);
     }
   }
+}
+
+function selectEdge(edgeId) {
+  selectedEdge = selectedEdge === edgeId ? null : edgeId;
+  renderEdges();
+  if (selectedEdge) {
+    const edge = edges.find(e => e.id === edgeId);
+    if (edge) addLog(`选中连线: ${edge.source} → ${edge.target}`);
+  }
+}
+
+function deleteEdge(edgeId) {
+  const idx = edges.findIndex(e => e.id === edgeId);
+  if (idx === -1) return;
+  const edge = edges[idx];
+  edges.splice(idx, 1);
+  if (selectedEdge === edgeId) selectedEdge = null;
+  renderEdges();
+  addLog(`删除连线: ${edge.source} → ${edge.target}`);
 }
 
 function createPath(x1, y1, cx1, cy1, cx2, cy2, x2, y2) {
@@ -684,7 +764,7 @@ async function runFlow() {
               });
             }
             nodes = newNodes;
-            edges = data.edges.map(e => ({ source: e.source, target: e.target }));
+            edges = data.edges.map(e => ({ id: `edge-${++edgeIdCounter}`, source: e.source, target: e.target }));
           }
           renderCanvas();
           setStatus('success', '完成');
@@ -732,8 +812,8 @@ function updateNodeStatus(data) {
 // ════════════════════════════════════════════════════════════
 function clearCanvas() {
   if (nodes.length > 0 && !confirm('确定清空画布？')) return;
-  nodes = []; edges = []; selectedNode = null;
-  renderCanvas(); renderConfigPanel();
+  nodes = []; edges = []; selectedNode = null; selectedEdge = null;
+  renderCanvas(); renderConfigPanel(); renderEdges();
   addLog('画布已清空');
 }
 
@@ -801,8 +881,10 @@ async function showHistory() {
 canvas.onclick = (e) => {
   if (e.target === canvas || e.target.classList.contains('canvas-empty') || e.target.classList.contains('edge-layer')) {
     selectedNode = null;
+    selectedEdge = null;
     renderCanvas();
     renderConfigPanel();
+    renderEdges();
   }
 };
 
@@ -814,6 +896,16 @@ renderNodeLibrary();
 // 空画布，用户从左栏拖拽节点
 renderCanvas();
 updateLLMBadge();
+
+// 键盘删除选中连线
+document.addEventListener('keydown', (e) => {
+  if ((e.key === 'Delete' || e.key === 'Backspace') && selectedEdge) {
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    e.preventDefault();
+    deleteEdge(selectedEdge);
+  }
+});
 
 // ════════════════════════════════════════════════════════════
 //  Tab 切换
