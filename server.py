@@ -22,6 +22,7 @@ list_models = _core.list_models
 list_datasets = _core.list_datasets
 list_runs = _core.store.list_runs
 get_run = _core.store.get_run
+LLMAnalyzer = _core.LLMAnalyzer
 _datasets_mod = import_module(f"{_PKG}.datasets.csv_loader")
 register_csv_dataset = _datasets_mod.register_csv_dataset
 
