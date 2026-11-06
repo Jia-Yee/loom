@@ -121,6 +121,14 @@
     padding: 6px 10px; font-size: 0.8rem; font-weight: 600; color: #fff;
     display: flex; align-items: center; gap: 6px;
   }
+  .canvas-node .node-title .node-run-btn {
+    margin-left: auto; background: rgba(255,255,255,0.2); border: none; color: #fff;
+    border-radius: 3px; cursor: pointer; font-size: 0.7rem; padding: 1px 6px;
+    transition: background 0.15s;
+  }
+  .canvas-node .node-title .node-run-btn:hover {
+    background: rgba(255,255,255,0.4);
+  }
   .canvas-node .node-body {
     padding: 6px 10px; font-size: 0.72rem; color: var(--text-light); line-height: 1.5;
   }

@@ -16,6 +16,8 @@ _PKG = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
 from importlib import import_module
 _core = import_module(f"{_PKG}.core")
 run = _core.run
+run_graph = _core.run_graph
+clear_cache = _core.clear_cache
 list_models = _core.list_models
 list_datasets = _core.list_datasets
 list_runs = _core.store.list_runs
@@ -236,6 +238,112 @@ def api_run_stream():
                 break
 
     return Response(generate(), mimetype="text/event-stream")
+
+
+@app.route("/api/run_graph", methods=["POST"])
+def api_run_graph():
+    """图执行 SSE：接受画布节点+边，按拓扑序执行，实时推送进度。
+
+    请求体:
+        nodes: [{id, type, config, ...}]     画布节点列表
+        edges: [{source, target}]             画布边列表
+        target_node_id: str | None           单节点执行时指定
+        clear_cache: bool                    是否清空缓存
+        llm_provider / llm_api_key / ...     LLM 配置
+        csv_config: dict | None              CSV 数据集配置
+    """
+    data = request.json or {}
+    nodes_data = data.get("nodes", [])
+    edges_data = data.get("edges", [])
+    target_node_id = data.get("target_node_id")
+    do_clear_cache = data.get("clear_cache", False)
+
+    # LLM 配置
+    llm_provider = data.get("llm_provider", "").strip()
+    llm_api_key = data.get("llm_api_key", "").strip()
+    llm_base_url = data.get("llm_base_url", "").strip()
+    llm_model = data.get("llm_model", "").strip()
+    llm_timeout = data.get("llm_timeout", "")
+
+    if llm_provider:
+        os.environ["AUTOML_LLM_PROVIDER"] = llm_provider
+    if llm_api_key:
+        os.environ["AUTOML_LLM_API_KEY"] = llm_api_key
+    if llm_base_url:
+        os.environ["AUTOML_LLM_BASE_URL"] = llm_base_url
+    if llm_model:
+        os.environ["AUTOML_LLM_MODEL"] = llm_model
+    if llm_timeout:
+        os.environ["AUTOML_LLM_TIMEOUT"] = str(llm_timeout)
+
+    # CSV 数据集注册
+    csv_config = data.get("csv_config")
+    if csv_config:
+        register_csv_dataset(
+            name=csv_config["name"],
+            csv_path=csv_config["filepath"],
+            target_column=csv_config["target_column"],
+            task_type=csv_config.get("task_type", "regression"),
+        )
+
+    if do_clear_cache:
+        clear_cache()
+
+    def generate():
+        import queue
+        import threading
+
+        q = queue.Queue()
+        log_lines = []
+
+        def on_step(step_data):
+            log_lines.append(f"[{step_data['step']}] {step_data['status']}: {step_data['message']}")
+            q.put(("step", step_data))
+
+        def run_in_thread():
+            try:
+                llm = LLMAnalyzer()
+                result = run_graph(
+                    nodes_data=nodes_data,
+                    edges_data=edges_data,
+                    target_node_id=target_node_id,
+                    on_step=on_step,
+                    llm=llm,
+                )
+                q.put(("done", result))
+            except Exception as e:
+                import traceback as tb
+                tb.print_exc()
+                q.put(("error", f"{type(e).__name__}: {e}"))
+
+        t = threading.Thread(target=run_in_thread, daemon=True)
+        t.start()
+
+        while True:
+            try:
+                kind, data = q.get(timeout=600)
+            except queue.Empty:
+                yield f"data: {json.dumps({'type': 'error', 'message': '超时（10分钟无响应）'})}\n\n"
+                break
+
+            if kind == "step":
+                yield f"data: {json.dumps({'type': 'step', **data})}\n\n"
+            elif kind == "done":
+                last_result_store["result"] = data
+                yield f"data: {json.dumps({'type': 'done', 'run_id': data['run_id'], 'metrics': data.get('metrics', {}), 'best_model': data.get('best_model'), 'node_displays': data.get('node_displays', {}), 'log': '\\n'.join(log_lines)})}\n\n"
+                break
+            elif kind == "error":
+                yield f"data: {json.dumps({'type': 'error', 'message': data, 'log': '\\n'.join(log_lines)})}\n\n"
+                break
+
+    return Response(generate(), mimetype="text/event-stream")
+
+
+@app.route("/api/clear_cache", methods=["POST"])
+def api_clear_cache():
+    """清空节点缓存。"""
+    clear_cache()
+    return jsonify({"status": "success", "message": "缓存已清空"})
 
 
 @app.route("/api/history")

@@ -10,6 +10,7 @@ from .registry import (
     list_datasets,
 )
 from .runner import run
+from .graph_runner import run_graph, clear_cache
 from .llm_analyzer import LLMAnalyzer
 from . import store
 
@@ -28,6 +29,8 @@ __all__ = [
     "list_models",
     "list_datasets",
     "run",
+    "run_graph",
+    "clear_cache",
     "LLMAnalyzer",
     "store",
 ]

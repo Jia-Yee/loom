@@ -56,9 +56,10 @@ const NODE_TYPES = {
   search: {
     label: '超参搜索', category: 'model', icon: '⚙️', color: 'var(--cat-model)',
     codeFile: 'core/runner.py',
-    inputs: [{ name: 'model', label: '模型' }],
+    inputs: [{ name: 'train', label: '训练集' }],
     outputs: [{ name: 'best_model', label: '最优模型' }],
     config: {
+      model_name: { type: 'select', label: '模型', options: ['linear_regression', 'ridge', 'random_forest', 'logistic_regression'], default: 'linear_regression' },
       n_iter: { type: 'number', label: '迭代次数', default: 10, min: 1, max: 100 },
       cv: { type: 'number', label: '交叉验证折数', default: 5, min: 2, max: 20 },
     },
@@ -243,6 +244,7 @@ function renderCanvas() {
       <div class="node-title" style="background:${def.color}">
         <span>${def.icon}</span>
         <span>${def.label}</span>
+        <button class="node-run-btn" data-node-id="${node.id}" title="执行此节点">▶</button>
       </div>
       <div class="node-body">${renderNodeBody(node)}</div>
       <div class="node-ports">
@@ -256,6 +258,11 @@ function renderCanvas() {
     `;
     el.onmousedown = (e) => startDrag(node, e);
     el.onclick = (e) => { e.stopPropagation(); selectNode(node.id); };
+    // 单节点运行按钮
+    el.querySelector('.node-run-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      runSingleNode(node.id);
+    });
     canvas.appendChild(el);
   });
 
@@ -638,61 +645,35 @@ function getUpstreamByType(nodeId, type) {
   return null;
 }
 
-async function runFlow() {
-  if (nodes.length === 0) { addLog('画布为空，请从左栏拖拽节点', 'error'); return; }
+// ════════════════════════════════════════════════════════════
+//  运行：图执行模式（边驱动拓扑排序）
+// ════════════════════════════════════════════════════════════
 
-  const datasetNode = nodes.find(n => (n.type === 'dataset' || n.type === 'csv_upload'));
-  if (!datasetNode) { addLog('缺少数据集节点，请拖入一个', 'error'); return; }
-
-  const modelNodes = nodes.filter(n => n.type === 'model');
-  if (modelNodes.length === 0) { addLog('缺少模型节点，请拖入至少一个', 'error'); return; }
-
-  // 检查哪些 model 有连线上游
-  const connectedModels = modelNodes.filter(m => edges.some(e => e.target === m.id));
-  const modelsToRun = connectedModels.length > 0 ? connectedModels : modelNodes;
-
-  const modelNames = modelsToRun.map(n => n.config.model_name).filter(Boolean);
-  if (modelNames.length === 0) { addLog('模型节点未选择模型（右栏配置模型名）', 'error'); return; }
-
-  // split: 优先从 model 上游找
-  let splitNode = null;
-  for (const m of modelsToRun) {
-    splitNode = getUpstreamByType(m.id, 'split');
-    if (splitNode) break;
-  }
-  if (!splitNode) splitNode = nodes.find(n => n.type === 'split');
-
-  // LLM config: 从 llm_pre/llm_post 上游找
-  let llmConfigNode = null;
-  const llmPre = nodes.find(n => n.type === 'llm_pre');
-  const llmPostNode = nodes.find(n => n.type === 'llm_post');
-  if (llmPre) llmConfigNode = getUpstreamByType(llmPre.id, 'llm_config');
-  if (!llmConfigNode && llmPostNode) llmConfigNode = getUpstreamByType(llmPostNode.id, 'llm_config');
-  if (!llmConfigNode) llmConfigNode = nodes.find(n => n.type === 'llm_config');
-
-  const searchNode = nodes.find(n => n.type === 'search');
-  const comparisonNode = nodes.find(n => n.type === 'comparison');
+function buildGraphPayload(targetNodeId = null) {
+  // 发送画布上的完整图（节点+边）给后端
+  const graphNodes = nodes.map(n => ({
+    id: n.id,
+    type: n.type,
+    label: NODE_TYPES[n.type]?.label || n.type,
+    config: n.config || {},
+  }));
+  const graphEdges = edges.map(e => ({
+    source: e.source,
+    target: e.target,
+  }));
 
   const body = {
-    model_names: modelNames,
-    dataset_name: datasetNode.config.dataset_name || 'diabetes',
-    test_size: splitNode ? (parseFloat(splitNode.config.test_size) || 0.2) : 0.2,
-    seed: splitNode ? (parseInt(splitNode.config.seed) || 42) : 42,
-    select_best: comparisonNode ? (comparisonNode.config.select_best === true || comparisonNode.config.select_best === 'true') : false,
-    llm_post_scope: llmPostNode ? (llmPostNode.config.llm_post_scope || 'all') : 'all',
-    search: !!searchNode,
-    n_iter: searchNode ? (parseInt(searchNode.config.n_iter) || 10) : 10,
-    cv: searchNode ? (parseInt(searchNode.config.cv) || 5) : 5,
+    nodes: graphNodes,
+    edges: graphEdges,
+    clear_cache: !targetNodeId,  // 全图运行时清缓存，单节点运行时用缓存
   };
 
-  // 步骤开关：画布上有哪些节点就执行哪些步骤
-  body.steps = {
-    data_analysis: nodes.some(n => n.type === 'data_analysis'),
-    llm_pre: !!llmPre,
-    llm_post: !!llmPostNode,
-  };
+  // 单节点执行
+  if (targetNodeId) {
+    body.target_node_id = targetNodeId;
+  }
 
-  // LLM 配置：从全局配置读取（localStorage）
+  // LLM 配置
   const llmCfg = getLLMConfig();
   if (llmCfg.provider) {
     body.llm_provider = llmCfg.provider;
@@ -702,33 +683,63 @@ async function runFlow() {
     body.llm_timeout = llmCfg.timeout;
   }
 
-  if (datasetNode.type === 'csv_upload' && datasetNode.config.filepath) {
+  // CSV 上传
+  const csvNode = nodes.find(n => n.type === 'csv_upload' && n.config.filepath);
+  if (csvNode) {
     body.csv_config = {
-      name: datasetNode.config.dataset_name || 'csv_data',
-      filepath: datasetNode.config.filepath,
-      target_column: datasetNode.config.target_column || '',
-      task_type: datasetNode.config.task_type || 'regression',
+      name: csvNode.config.dataset_name || 'csv_data',
+      filepath: csvNode.config.filepath,
+      target_column: csvNode.config.target_column || '',
+      task_type: csvNode.config.task_type || 'regression',
     };
   }
 
-  addLog(`启动流水线: 模型=${modelNames}, 数据集=${body.dataset_name}`);
-  if (llmCfg.provider) addLog(`LLM: ${llmCfg.provider}/${llmCfg.model}`);
-  if (splitNode) addLog(`切分: test_size=${body.test_size}, seed=${body.seed}`);
-  if (searchNode) addLog(`搜索: n_iter=${body.n_iter}, cv=${body.cv}`);
+  return body;
+}
+
+async function runFlow() {
+  if (nodes.length === 0) { addLog('画布为空，请从左栏拖拽节点', 'error'); return; }
+
+  // 基本校验
+  const datasetNode = nodes.find(n => n.type === 'dataset' || n.type === 'csv_upload');
+  if (!datasetNode) { addLog('缺少数据集节点', 'error'); return; }
+  const modelNodes = nodes.filter(n => n.type === 'model' || n.type === 'search');
+  if (modelNodes.length === 0) { addLog('缺少模型节点', 'error'); return; }
+
+  const body = buildGraphPayload(null);
+
+  addLog(`启动流水线: ${nodes.length} 个节点, ${edges.length} 条连线`);
+  if (body.llm_provider) addLog(`LLM: ${body.llm_provider}/${body.llm_model}`);
   setStatus('running', '运行中...');
   document.getElementById('btnRun').disabled = true;
 
-  modelsToRun.forEach(n => n.status = 'running');
-  if (datasetNode) datasetNode.status = 'running';
-  if (splitNode) splitNode.status = 'running';
-  if (llmPre) llmPre.status = 'running';
-  if (llmPostNode) llmPostNode.status = 'running';
-  if (comparisonNode) comparisonNode.status = 'running';
-  if (searchNode) searchNode.status = 'running';
+  // 所有节点设为 running
+  nodes.forEach(n => { n.status = 'running'; });
   renderCanvas();
 
+  await executeGraph(body);
+}
+
+async function runSingleNode(nodeId) {
+  const node = nodes.find(n => n.id === nodeId);
+  if (!node) return;
+
+  const body = buildGraphPayload(nodeId);
+
+  addLog(`执行单节点: ${node.type} (${nodeId})`);
+  setStatus('running', `执行 ${node.type}...`);
+  document.getElementById('btnRun').disabled = true;
+
+  // 目标节点设为 running
+  node.status = 'running';
+  renderCanvas();
+
+  await executeGraph(body);
+}
+
+async function executeGraph(body) {
   try {
-    const res = await fetch('/api/run_stream', {
+    const res = await fetch('/api/run_graph', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -752,40 +763,25 @@ async function runFlow() {
         if (data.type === 'step') {
           const icon = { running: '⏳', success: '✅', failed: '❌', skipped: '⏭️' }[data.status] || '⏳';
           addLog(`${icon} [${data.step}] ${data.message}`, data.status === 'failed' ? 'error' : data.status === 'success' ? 'success' : '');
-          // 更新对应节点状态
           updateNodeStatus(data);
         } else if (data.type === 'done') {
-          // 不替换画布——只用后端返回的 display 数据更新已有节点的状态
-          if (data.nodes) {
-            for (const srvNode of data.nodes) {
-              // 后端节点类型 → 前端节点类型映射
-              let frontendType = srvNode.type;
-              if (srvNode.type === 'llm_analysis') {
-                frontendType = srvNode.display?.stage === 'pre_train' ? 'llm_pre' : 'llm_post';
-              }
-              if (srvNode.type === 'config') continue; // 前端无 config 节点类型
-
-              // 多模型场景：按 model_name 匹配；否则按类型匹配
-              let node;
-              if (srvNode.display?.model_name) {
-                node = nodes.find(n => n.type === frontendType && n.config?.model_name === srvNode.display.model_name);
-              }
-              if (!node) {
-                node = nodes.find(n => n.type === frontendType);
-              }
+          // 用后端返回的 display 数据更新节点
+          if (data.node_displays) {
+            for (const [nid, display] of Object.entries(data.node_displays)) {
+              const node = nodes.find(n => n.id === nid);
               if (node) {
-                node.status = srvNode.status;
-                node.display = srvNode.display;
+                node.display = display;
+                node.status = 'success';
               }
             }
           }
-          // 将仍在 running 状态的节点标记为 success
-          nodes.forEach(n => { if (n.status === 'running') n.status = 'success'; });
+          // 将仍在 running 的节点标记为 failed
+          nodes.forEach(n => { if (n.status === 'running') n.status = 'failed'; });
           renderCanvas();
           setStatus('success', '完成');
           addLog(`\n✅ 流水线完成！run_id=${data.run_id}`, 'success');
           if (data.best_model) addLog(`⭐ 最优模型: ${data.best_model}`, 'success');
-          for (const [name, m] of Object.entries(data.metrics)) {
+          for (const [name, m] of Object.entries(data.metrics || {})) {
             const s = Object.entries(m).map(([k,v]) => `${k}=${v.toFixed(4)}`).join('  ');
             addLog(`  ${name}: ${s}`);
           }
@@ -806,7 +802,20 @@ async function runFlow() {
 }
 
 function updateNodeStatus(data) {
-  // 根据 step 更新画布节点状态
+  // 图执行模式：按 node_id 直接匹配
+  if (data.node_id) {
+    const node = nodes.find(n => n.id === data.node_id);
+    if (node) {
+      node.status = data.status;
+      if (data.display) {
+        node.display = data.display;
+      }
+      renderCanvas();
+      return;
+    }
+  }
+
+  // 向后兼容：按 step → nodeType 映射
   const stepMap = {
     'dataset': 'dataset', 'split': 'split', 'train': 'model', 'search': 'search',
     'metric': 'metric', 'llm_pre': 'llm_pre', 'llm_post': 'llm_post',
@@ -815,7 +824,6 @@ function updateNodeStatus(data) {
   const nodeType = stepMap[data.step];
   if (!nodeType) return;
 
-  // 多模型场景：按 model_name 匹配
   let node;
   if (data.model_name && ['model', 'metric', 'search', 'llm_post'].includes(nodeType)) {
     node = nodes.find(n => n.type === nodeType && n.config?.model_name === data.model_name);
