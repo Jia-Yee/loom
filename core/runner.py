@@ -6,8 +6,10 @@
 - 超参数随机搜索（search/n_iter/cv）
 - 回归/分类任务切换（task_type 校验与指标适配）
 - LLM 训练前分析（一次）+ 训练后解读（按模型，可配置 scope）
+- 数据分析节点（可选）
 - 运行参数节点（test_size / seed 可视化）
 - 进度回调（on_step 回调函数，实时推送步骤状态）
+- 步骤开关（steps 参数，前端画布节点决定执行哪些步骤）
 """
 
 import json
@@ -69,6 +71,7 @@ def run(
     search: bool = False,
     n_iter: int = 10,
     cv: int = 5,
+    steps: dict | None = None,
     on_step: Callable[[dict], None] | None = None,
 ) -> dict:
     """统一调度入口。
@@ -83,7 +86,8 @@ def run(
         search: 是否启用超参搜索
         n_iter: RandomizedSearchCV 迭代次数
         cv: 交叉验证折数
-        on_step: 进度回调，每步调用 on_step({"step": str, "status": str, "message": str, "data": ...})
+        steps: 步骤开关（前端画布节点决定）。None=全部启用（CLI 模式）
+        on_step: 进度回调
 
     返回：
         {run_id, metrics, best_model, nodes, edges}
@@ -91,6 +95,12 @@ def run(
     def _emit(step: str, status: str = "running", message: str = "", **extra):
         if on_step:
             on_step({"step": step, "status": status, "message": message, **extra})
+
+    def _step_enabled(step_name: str) -> bool:
+        """检查步骤是否启用。steps=None 时全部启用（CLI 模式）。"""
+        if steps is None:
+            return True
+        return steps.get(step_name, True)
 
     # ── 统一为列表 ────────────────────────────────────────
     if isinstance(model_names, str):
@@ -105,7 +115,14 @@ def run(
     X, y = dataset.load()
     data_summary = dataset.summary()
     task_type = dataset.task_type
-    _emit("dataset", "success", f"数据集加载完成：{data_summary['n_samples']} 样本 × {data_summary['n_features']} 特征")
+
+    dataset_display = {
+        "n_samples": data_summary["n_samples"],
+        "n_features": data_summary["n_features"],
+        "feature_names": data_summary["feature_names"],
+        "task_type": task_type,
+    }
+    _emit("dataset", "success", f"数据集加载完成：{data_summary['n_samples']} 样本 × {data_summary['n_features']} 特征", display=dataset_display)
 
     run_id = datetime.now().strftime("%Y%m%d-%H%M%S") + f"-{dataset_name}"
 
@@ -125,7 +142,6 @@ def run(
         raise ValueError(f"模型列表包含混合任务类型: {model_task_types}")
 
     # ── LLM 初始化 ────────────────────────────────────────
-    # LLM 日志通过 on_step 推送到前端
     def _llm_log(msg: str):
         _emit("llm_log", "running", msg)
 
@@ -167,60 +183,101 @@ def run(
         "label": f"数据集: {dataset_name}",
         "status": "success",
         "position": {"x": 0, "y": 0},
-        "display": {
+        "display": dataset_display,
+    })
+    edges.append({"source": config_node_id, "target": dataset_node_id})
+
+    # 跟踪前一个节点，用于边连接
+    prev_node_id = dataset_node_id
+
+    # ── 数据分析（可选，基于画布节点）────────────────────
+    if _step_enabled("data_analysis"):
+        da_node_id = "data_analysis"
+        _emit("data_analysis", "running", "数据分析中...")
+        feature_stats = []
+        for j, fn in enumerate(data_summary["feature_names"]):
+            col = X[:, j]
+            feature_stats.append({
+                "name": fn,
+                "mean": float(np.mean(col)),
+                "std": float(np.std(col)),
+                "min": float(np.min(col)),
+                "max": float(np.max(col)),
+                "median": float(np.median(col)),
+                "missing": int(np.isnan(col).sum()),
+            })
+        analysis_display = {
             "n_samples": data_summary["n_samples"],
             "n_features": data_summary["n_features"],
             "feature_names": data_summary["feature_names"],
             "task_type": task_type,
-        },
-    })
-    edges.append({"source": config_node_id, "target": dataset_node_id})
-
-    # ── 训练前 LLM 分析（仅一次）──────────────────────────
-    llm_pre_id = "llm_pre"
-    if llm.available:
-        _emit("llm_pre", "running", "训练前 LLM 分析中...", model_name=None)
-        llm_pre_result = llm.analyze_data(data_summary)
-    else:
-        llm_pre_result = None
-
-    if llm_pre_result is not None:
+            "target_mean": data_summary["target_mean"],
+            "target_std": data_summary["target_std"],
+            "feature_scale_ratio": data_summary["feature_scale_ratio"],
+            "features_with_missing": data_summary.get("features_with_missing", []),
+            "feature_stats": feature_stats,
+        }
+        _emit("data_analysis", "success", "数据分析完成", display=analysis_display)
         nodes.append({
-            "id": llm_pre_id,
-            "type": "llm_analysis",
-            "label": "训练前 LLM 分析",
+            "id": da_node_id,
+            "type": "data_analysis",
+            "label": "数据分析",
             "status": "success",
-            "position": {"x": 125, "y": 0},
-            "display": {
+            "position": {"x": 125, "y": 80},
+            "display": analysis_display,
+        })
+        edges.append({"source": prev_node_id, "target": da_node_id})
+        prev_node_id = da_node_id
+
+    # ── 训练前 LLM 分析（可选，基于画布节点）──────────────
+    if _step_enabled("llm_pre"):
+        llm_pre_id = "llm_pre"
+        if llm.available:
+            _emit("llm_pre", "running", "训练前 LLM 分析中...", model_name=None)
+            llm_pre_result = llm.analyze_data(data_summary)
+        else:
+            llm_pre_result = None
+
+        if llm_pre_result is not None:
+            pre_display = {
                 "stage": "pre_train",
                 "model_name": None,
                 "content": llm_pre_result["content"],
                 "structured": llm_pre_result["structured"],
                 "parse_failed": llm_pre_result["parse_failed"],
-            },
-        })
-        edges.append({"source": dataset_node_id, "target": llm_pre_id})
-        _emit("llm_pre", "success", "训练前 LLM 分析完成")
-        _print_llm("训练前分析", llm_pre_result)
-    else:
-        reason = "未配置 LLM" if not llm.available else f"调用失败（{llm.last_error}）"
-        nodes.append({
-            "id": llm_pre_id,
-            "type": "llm_analysis",
-            "label": "训练前 LLM 分析",
-            "status": "skipped",
-            "position": {"x": 125, "y": 0},
-            "display": {
-                "stage": "pre_train",
-                "model_name": None,
-                "content": "",
-                "structured": None,
-                "parse_failed": True,
-            },
-        })
-        edges.append({"source": dataset_node_id, "target": llm_pre_id})
-        _emit("llm_pre", "skipped", f"训练前 LLM 分析跳过（{reason}）")
-        print(f"\n[LLM 训练前分析] 跳过（{reason}）")
+            }
+            nodes.append({
+                "id": llm_pre_id,
+                "type": "llm_analysis",
+                "label": "训练前 LLM 分析",
+                "status": "success",
+                "position": {"x": 125, "y": 0},
+                "display": pre_display,
+            })
+            edges.append({"source": prev_node_id, "target": llm_pre_id})
+            prev_node_id = llm_pre_id
+            _emit("llm_pre", "success", "训练前 LLM 分析完成", display=pre_display)
+            _print_llm("训练前分析", llm_pre_result)
+        else:
+            reason = "未配置 LLM" if not llm.available else f"调用失败（{llm.last_error}）"
+            nodes.append({
+                "id": llm_pre_id,
+                "type": "llm_analysis",
+                "label": "训练前 LLM 分析",
+                "status": "skipped",
+                "position": {"x": 125, "y": 0},
+                "display": {
+                    "stage": "pre_train",
+                    "model_name": None,
+                    "content": "",
+                    "structured": None,
+                    "parse_failed": True,
+                },
+            })
+            edges.append({"source": prev_node_id, "target": llm_pre_id})
+            prev_node_id = llm_pre_id
+            _emit("llm_pre", "skipped", f"训练前 LLM 分析跳过（{reason}）")
+            print(f"\n[LLM 训练前分析] 跳过（{reason}）")
 
     # ── 划分数据（作为独立节点）────────────────────────────
     split_node_id = "split"
@@ -230,19 +287,20 @@ def run(
         X, y, test_size=test_size, random_state=seed, stratify=stratify
     )
     n_train, n_test = X_train.shape[0], X_test.shape[0]
-    _emit("split", "success", f"训练集 {n_train} 样本，测试集 {n_test} 样本")
+    split_display = {
+        "test_size": test_size, "seed": seed,
+        "n_train": n_train, "n_test": n_test,
+        "stratified": stratify is not None,
+    }
+    _emit("split", "success", f"训练集 {n_train} 样本，测试集 {n_test} 样本", display=split_display)
 
     nodes.append({
         "id": split_node_id, "type": "split",
         "label": "数据切分", "status": "success",
         "position": {"x": 250, "y": 0},
-        "display": {
-            "test_size": test_size, "seed": seed,
-            "n_train": n_train, "n_test": n_test,
-            "stratified": stratify is not None,
-        },
+        "display": split_display,
     })
-    edges.append({"source": llm_pre_id, "target": split_node_id})
+    edges.append({"source": prev_node_id, "target": split_node_id})
 
     # ── 逐模型训练评估 ────────────────────────────────────
     metrics: dict[str, dict[str, float]] = {}
@@ -284,7 +342,14 @@ def run(
                     "enabled": True, "n_iter": n_iter, "cv": cv,
                     "best_score": float(search_cv.best_score_),
                 }
-                _emit("search", "success", f"超参搜索完成: best_score={search_cv.best_score_:.4f}", model_name=model_name)
+                search_display = {
+                    "model_name": model_name,
+                    "n_iter": search_info["n_iter"],
+                    "cv": search_info["cv"],
+                    "best_score": search_info["best_score"],
+                    "param_space": model.param_space(),
+                }
+                _emit("search", "success", f"超参搜索完成: best_score={search_cv.best_score_:.4f}", model_name=model_name, display=search_display)
                 print(f"\n[{model_name}] 超参搜索完成: best_score={search_cv.best_score_:.4f}")
             elif search and not param_space:
                 search_info["enabled"] = False
@@ -313,12 +378,17 @@ def run(
         params = model.get_params()
 
         metric_str = "  ".join(f"{k}={v:.4f}" for k, v in model_metrics.items())
-        _emit("train", "success", f"模型 {model_name} 完成: {metric_str}", model_name=model_name)
-        print(f"\n[{model_name}] {metric_str}")
 
         model_display = {"model_name": model_name, "params": params}
         if search:
             model_display["search_info"] = search_info
+
+        metric_display = {"model_name": model_name}
+        metric_display.update(model_metrics)
+
+        _emit("train", "success", f"模型 {model_name} 完成: {metric_str}", model_name=model_name, display=model_display)
+        _emit("metric", "success", f"指标: {metric_str}", model_name=model_name, display=metric_display)
+        print(f"\n[{model_name}] {metric_str}")
 
         nodes.append({
             "id": model_node_id, "type": "model",
@@ -335,18 +405,11 @@ def run(
                 "id": search_node_id, "type": "search",
                 "label": f"超参搜索: {model_name}", "status": "success",
                 "position": {"x": 625, "y": y_offset},
-                "display": {
-                    "model_name": model_name,
-                    "n_iter": search_info["n_iter"],
-                    "cv": search_info["cv"],
-                    "best_score": search_info["best_score"],
-                    "param_space": model.param_space(),
-                },
+                "display": search_display,
             })
             edges.append({"source": model_node_id, "target": search_node_id})
             edges.append({"source": search_node_id, "target": metric_node_id})
         elif search:
-            # 搜索开启但该模型跳过了（param_space 为空）
             search_node_id = f"search-{model_name}"
             nodes.append({
                 "id": search_node_id, "type": "search",
@@ -365,8 +428,6 @@ def run(
             edges.append({"source": model_node_id, "target": metric_node_id})
 
         # metric 节点
-        metric_display = {"model_name": model_name}
-        metric_display.update(model_metrics)
         nodes.append({
             "id": metric_node_id, "type": "metric",
             "label": f"指标: {model_name}", "status": "success",
@@ -397,67 +458,70 @@ def run(
 
         comp_y = sum(r["y_offset"] for r in model_results) / len(model_results)
         comp_node_id = "comparison"
+        comp_display = {"models": comp_models, "best_model": best_model_name}
         nodes.append({
             "id": comp_node_id, "type": "comparison",
             "label": "模型对比", "status": "success",
             "position": {"x": 1000, "y": comp_y},
-            "display": {"models": comp_models, "best_model": best_model_name},
+            "display": comp_display,
         })
         for r in model_results:
             edges.append({"source": r["metric_node_id"], "target": comp_node_id})
 
-        _emit("select_best", "success", f"最优模型: {best_model_name} ({best_key}={best_result['metrics'][best_key]:.4f})")
+        _emit("select_best", "success", f"最优模型: {best_model_name} ({best_key}={best_result['metrics'][best_key]:.4f})", display=comp_display)
         print(f"\n▶ 最优模型: {best_model_name} ({best_key}={best_result['metrics'][best_key]:.4f})")
 
-    # ── 训练后 LLM 解读 ────────────────────────────────────
-    for r in model_results:
-        model_name = r["model_name"]
-        llm_post_id = r["llm_post_id"]
-        metric_node_id = r["metric_node_id"]
-        y_offset = r["y_offset"]
+    # ── 训练后 LLM 解读（可选，基于画布节点）──────────────
+    if _step_enabled("llm_post"):
+        for r in model_results:
+            model_name = r["model_name"]
+            llm_post_id = r["llm_post_id"]
+            metric_node_id = r["metric_node_id"]
+            y_offset = r["y_offset"]
 
-        if llm_post_scope == "best" and best_model_name and model_name != best_model_name:
-            _emit("llm_post", "skipped", f"结果解读 {model_name} 跳过（scope=best）", model_name=model_name)
-            print(f"[LLM 结果解读 {model_name}] 跳过（scope=best，非最优模型）")
-            continue
+            if llm_post_scope == "best" and best_model_name and model_name != best_model_name:
+                _emit("llm_post", "skipped", f"结果解读 {model_name} 跳过（scope=best）", model_name=model_name)
+                print(f"[LLM 结果解读 {model_name}] 跳过（scope=best，非最优模型）")
+                continue
 
-        if llm.available:
-            _emit("llm_post", "running", f"结果解读 {model_name} 中...", model_name=model_name)
-            llm_post_result = llm.analyze_results(model_name, metrics[model_name], data_summary)
-        else:
-            llm_post_result = None
+            if llm.available:
+                _emit("llm_post", "running", f"结果解读 {model_name} 中...", model_name=model_name)
+                llm_post_result = llm.analyze_results(model_name, metrics[model_name], data_summary)
+            else:
+                llm_post_result = None
 
-        post_x = 1250 if select_best and len(model_results) > 1 else 1000
+            post_x = 1250 if select_best and len(model_results) > 1 else 1000
 
-        if llm_post_result is not None:
-            nodes.append({
-                "id": llm_post_id, "type": "llm_analysis",
-                "label": f"结果解读: {model_name}", "status": "success",
-                "position": {"x": post_x, "y": y_offset},
-                "display": {
+            if llm_post_result is not None:
+                post_display = {
                     "stage": "post_train", "model_name": model_name,
                     "content": llm_post_result["content"],
                     "structured": llm_post_result["structured"],
                     "parse_failed": llm_post_result["parse_failed"],
-                },
-            })
-            edges.append({"source": metric_node_id, "target": llm_post_id})
-            _emit("llm_post", "success", f"结果解读 {model_name} 完成", model_name=model_name)
-            _print_llm(f"结果解读 [{model_name}]", llm_post_result)
-        else:
-            reason = "未配置 LLM" if not llm.available else f"调用失败（{llm.last_error}）"
-            nodes.append({
-                "id": llm_post_id, "type": "llm_analysis",
-                "label": f"结果解读: {model_name}", "status": "skipped",
-                "position": {"x": post_x, "y": y_offset},
-                "display": {
-                    "stage": "post_train", "model_name": model_name,
-                    "content": "", "structured": None, "parse_failed": True,
-                },
-            })
-            edges.append({"source": metric_node_id, "target": llm_post_id})
-            _emit("llm_post", "skipped", f"结果解读 {model_name} 跳过（{reason}）", model_name=model_name)
-            print(f"[LLM 结果解读 {model_name}] 跳过（{reason}）")
+                }
+                nodes.append({
+                    "id": llm_post_id, "type": "llm_analysis",
+                    "label": f"结果解读: {model_name}", "status": "success",
+                    "position": {"x": post_x, "y": y_offset},
+                    "display": post_display,
+                })
+                edges.append({"source": metric_node_id, "target": llm_post_id})
+                _emit("llm_post", "success", f"结果解读 {model_name} 完成", model_name=model_name, display=post_display)
+                _print_llm(f"结果解读 [{model_name}]", llm_post_result)
+            else:
+                reason = "未配置 LLM" if not llm.available else f"调用失败（{llm.last_error}）"
+                nodes.append({
+                    "id": llm_post_id, "type": "llm_analysis",
+                    "label": f"结果解读: {model_name}", "status": "skipped",
+                    "position": {"x": post_x, "y": y_offset},
+                    "display": {
+                        "stage": "post_train", "model_name": model_name,
+                        "content": "", "structured": None, "parse_failed": True,
+                    },
+                })
+                edges.append({"source": metric_node_id, "target": llm_post_id})
+                _emit("llm_post", "skipped", f"结果解读 {model_name} 跳过（{reason}）", model_name=model_name)
+                print(f"[LLM 结果解读 {model_name}] 跳过（{reason}）")
 
     # ── 组装结果 ──────────────────────────────────────────
     result = {

@@ -154,6 +154,7 @@ def api_run_stream():
     search = bool(data.get("search", False))
     n_iter = int(data.get("n_iter", 10))
     cv = int(data.get("cv", 5))
+    steps = data.get("steps", {})
 
     # LLM 配置
     llm_provider = data.get("llm_provider", "").strip()
@@ -207,6 +208,7 @@ def api_run_stream():
                     search=search,
                     n_iter=n_iter,
                     cv=cv,
+                    steps=steps,
                     on_step=on_step,
                 )
                 q.put(("done", result))

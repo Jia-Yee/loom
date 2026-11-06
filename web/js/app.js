@@ -685,6 +685,13 @@ async function runFlow() {
     cv: searchNode ? (parseInt(searchNode.config.cv) || 5) : 5,
   };
 
+  // 步骤开关：画布上有哪些节点就执行哪些步骤
+  body.steps = {
+    data_analysis: nodes.some(n => n.type === 'data_analysis'),
+    llm_pre: !!llmPre,
+    llm_post: !!llmPostNode,
+  };
+
   // LLM 配置：从全局配置读取（localStorage）
   const llmCfg = getLLMConfig();
   if (llmCfg.provider) {
@@ -748,24 +755,32 @@ async function runFlow() {
           // 更新对应节点状态
           updateNodeStatus(data);
         } else if (data.type === 'done') {
-          // 用后端返回的 nodes/edges 更新画布
+          // 不替换画布——只用后端返回的 display 数据更新已有节点的状态
           if (data.nodes) {
-            // 保留用户画布上的位置，用后端结果更新状态和 display
-            const newNodes = [];
             for (const srvNode of data.nodes) {
-              const existing = nodes.find(ln => ln.id === srvNode.id || ln.type === srvNode.type);
-              const def = NODE_TYPES[srvNode.type] || { color: '#666' };
-              newNodes.push({
-                ...srvNode,
-                color: def.color,
-                x: existing ? existing.x : (srvNode.position?.x || 0),
-                y: existing ? existing.y : (srvNode.position?.y || 0),
-                config: existing ? existing.config : {},
-              });
+              // 后端节点类型 → 前端节点类型映射
+              let frontendType = srvNode.type;
+              if (srvNode.type === 'llm_analysis') {
+                frontendType = srvNode.display?.stage === 'pre_train' ? 'llm_pre' : 'llm_post';
+              }
+              if (srvNode.type === 'config') continue; // 前端无 config 节点类型
+
+              // 多模型场景：按 model_name 匹配；否则按类型匹配
+              let node;
+              if (srvNode.display?.model_name) {
+                node = nodes.find(n => n.type === frontendType && n.config?.model_name === srvNode.display.model_name);
+              }
+              if (!node) {
+                node = nodes.find(n => n.type === frontendType);
+              }
+              if (node) {
+                node.status = srvNode.status;
+                node.display = srvNode.display;
+              }
             }
-            nodes = newNodes;
-            edges = data.edges.map(e => ({ id: `edge-${++edgeIdCounter}`, source: e.source, target: e.target }));
           }
+          // 将仍在 running 状态的节点标记为 success
+          nodes.forEach(n => { if (n.status === 'running') n.status = 'success'; });
           renderCanvas();
           setStatus('success', '完成');
           addLog(`\n✅ 流水线完成！run_id=${data.run_id}`, 'success');
@@ -795,15 +810,26 @@ function updateNodeStatus(data) {
   const stepMap = {
     'dataset': 'dataset', 'split': 'split', 'train': 'model', 'search': 'search',
     'metric': 'metric', 'llm_pre': 'llm_pre', 'llm_post': 'llm_post',
-    'select_best': 'comparison',
+    'select_best': 'comparison', 'data_analysis': 'data_analysis',
   };
   const nodeType = stepMap[data.step];
-  if (nodeType) {
-    const node = nodes.find(n => n.type === nodeType);
-    if (node) {
-      node.status = data.status;
-      renderCanvas();
+  if (!nodeType) return;
+
+  // 多模型场景：按 model_name 匹配
+  let node;
+  if (data.model_name && ['model', 'metric', 'search', 'llm_post'].includes(nodeType)) {
+    node = nodes.find(n => n.type === nodeType && n.config?.model_name === data.model_name);
+  }
+  if (!node) {
+    node = nodes.find(n => n.type === nodeType);
+  }
+
+  if (node) {
+    node.status = data.status;
+    if (data.display) {
+      node.display = { ...node.display, ...data.display };
     }
+    renderCanvas();
   }
 }
 
