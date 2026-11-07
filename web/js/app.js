@@ -47,7 +47,7 @@ const NODE_TYPES = {
   model: {
     label: '模型训练', category: 'model', icon: '🧠', color: 'var(--cat-model)',
     codeFile: 'models/linear.py',
-    inputs: [{ name: 'train', label: '训练集' }],
+    inputs: [{ name: 'train', label: '训练集' }, { name: 'test', label: '测试集' }],
     outputs: [{ name: 'model', label: '模型' }],
     config: {
       model_name: { type: 'select', label: '模型', options: ['linear_regression', 'random_forest', 'ridge', 'logistic_regression'], default: 'linear_regression' },
@@ -56,8 +56,8 @@ const NODE_TYPES = {
   search: {
     label: '超参搜索', category: 'model', icon: '⚙️', color: 'var(--cat-model)',
     codeFile: 'core/runner.py',
-    inputs: [{ name: 'train', label: '训练集' }],
-    outputs: [{ name: 'best_model', label: '最优模型' }],
+    inputs: [{ name: 'train', label: '训练集' }, { name: 'test', label: '测试集' }],
+    outputs: [{ name: 'model', label: '模型' }],
     config: {
       model_name: { type: 'select', label: '模型', options: ['linear_regression', 'ridge', 'random_forest', 'logistic_regression'], default: 'linear_regression' },
       n_iter: { type: 'number', label: '迭代次数', default: 10, min: 1, max: 100 },
@@ -69,15 +69,15 @@ const NODE_TYPES = {
   metric: {
     label: '评估指标', category: 'eval', icon: '📈', color: 'var(--cat-eval)',
     codeFile: 'core/runner.py',
-    inputs: [{ name: 'model', label: '模型' }, { name: 'test', label: '测试集' }],
+    inputs: [{ name: 'model', label: '模型' }],
     outputs: [{ name: 'metrics', label: '指标' }],
     config: {},
   },
   comparison: {
     label: '模型对比', category: 'eval', icon: '🏆', color: 'var(--cat-eval)',
     codeFile: 'core/runner.py',
-    inputs: [{ name: 'metrics', label: '指标列表' }],
-    outputs: [],
+    inputs: [{ name: 'metrics', label: '指标' }],
+    outputs: [{ name: 'comparison', label: '对比' }],
     config: {
       select_best: { type: 'checkbox', label: '自动选优', default: true },
     },
@@ -94,7 +94,7 @@ const NODE_TYPES = {
   llm_post: {
     label: '结果解读', category: 'llm', icon: '💬', color: 'var(--cat-llm)',
     codeFile: 'core/llm_analyzer.py',
-    inputs: [{ name: 'metrics', label: '指标' }],
+    inputs: [{ name: 'metrics', label: '指标' }, { name: 'data', label: '数据' }],
     outputs: [{ name: 'interpretation', label: '解读' }],
     config: {
       llm_post_scope: { type: 'select', label: '解读范围', options: ['all', 'best'], default: 'all' },
@@ -144,6 +144,7 @@ let nodeIdCounter = 0;
 let draggingNode = null;
 let connectingPort = null;
 let connectSource = null;   // 连线拖拽的源节点 ID
+let connectSourcePort = null; // 连线拖拽的源端口名
 let connectDir = null;      // 连线拖拽的方向 ('output' | 'input')
 
 // ════════════════════════════════════════════════════════════
@@ -248,11 +249,11 @@ function renderCanvas() {
       </div>
       <div class="node-body">${renderNodeBody(node)}</div>
       <div class="node-ports">
-        <div style="display:flex;gap:4px;align-items:center;">
-          ${(def.inputs||[]).map(p => `<div class="port input" data-node="${node.id}" data-port="${p.name}" data-dir="input" title="${p.label}"></div>`).join('')}
+        <div class="port-list port-list-input">
+          ${(def.inputs||[]).map(p => `<div class="port-group"><div class="port input" data-node="${node.id}" data-port="${p.name}" data-dir="input" title="${p.label}"></div><span class="port-label">${p.label}</span></div>`).join('')}
         </div>
-        <div style="display:flex;gap:4px;align-items:center;">
-          ${(def.outputs||[]).map(p => `<div class="port output" data-node="${node.id}" data-port="${p.name}" data-dir="output" title="${p.label}"></div>`).join('')}
+        <div class="port-list port-list-output">
+          ${(def.outputs||[]).map(p => `<div class="port-group"><span class="port-label">${p.label}</span><div class="port output" data-node="${node.id}" data-port="${p.name}" data-dir="output" title="${p.label}"></div></div>`).join('')}
         </div>
       </div>
     `;
@@ -353,14 +354,13 @@ function startConnect(port, e) {
   const nodeId = port.dataset.node;
   const portName = port.dataset.port;
   const dir = port.dataset.dir;
-  // 允许从 output 或 input 端口开始拖拽
   connectSource = nodeId;
+  connectSourcePort = portName;
   connectDir = dir;
   port.classList.add('port-active');
 
   const onMove = (e) => {
     renderEdges(e);
-    // 高亮潜在目标端口
     const el = document.elementFromPoint(e.clientX, e.clientY);
     canvas.querySelectorAll('.port-hover').forEach(p => p.classList.remove('port-hover'));
     if (el && el.classList.contains('port') && el.dataset.dir !== dir && el.dataset.node !== nodeId) {
@@ -376,25 +376,36 @@ function startConnect(port, e) {
     const target = document.elementFromPoint(e.clientX, e.clientY);
     if (target && target.classList.contains('port') && target.dataset.dir !== dir) {
       const targetNode = target.dataset.node;
+      const targetPort = target.dataset.port;
       if (targetNode !== nodeId) {
-        // 根据拖拽方向确定 source/target
-        let src, tgt;
+        let src, tgt, srcPort, tgtPort;
         if (dir === 'output') {
           src = nodeId; tgt = targetNode;
+          srcPort = portName; tgtPort = targetPort;
         } else {
           src = targetNode; tgt = nodeId;
+          srcPort = targetPort; tgtPort = portName;
         }
-        // 避免重复连线
-        if (!edges.some(ed => ed.source === src && ed.target === tgt)) {
+        if (!edges.some(ed => ed.source === src && ed.target === tgt && ed.sourcePort === srcPort && ed.targetPort === tgtPort)) {
+          const tgtNode = nodes.find(n => n.id === tgt);
+          const tgtType = tgtNode ? tgtNode.type : '';
+          if (tgtType !== 'comparison') {
+            const existing = edges.findIndex(ed => ed.target === tgt && ed.targetPort === tgtPort);
+            if (existing !== -1) {
+              edges.splice(existing, 1);
+              addLog(`替换输入端口「${tgtPort}」的连线`, 'warning');
+            }
+          }
           const edgeId = `edge-${++edgeIdCounter}`;
-          edges.push({ id: edgeId, source: src, target: tgt });
-          addLog(`连线: ${src} → ${tgt}`);
+          edges.push({ id: edgeId, source: src, target: tgt, sourcePort: srcPort, targetPort: tgtPort });
+          addLog(`连线: ${src}.${srcPort} → ${tgt}.${tgtPort}`);
         } else {
-          addLog(`连线已存在: ${src} → ${tgt}`, 'warning');
+          addLog(`连线已存在`, 'warning');
         }
       }
     }
     connectSource = null;
+    connectSourcePort = null;
     connectDir = null;
     renderEdges();
   };
@@ -402,9 +413,25 @@ function startConnect(port, e) {
   document.addEventListener('mouseup', onUp);
 }
 
+// 获取端口在画布中的坐标
+function getPortPos(nodeId, portName, dir) {
+  const nodeEl = document.getElementById(`cn-${nodeId}`);
+  if (!nodeEl) return null;
+  const port = nodeEl.querySelector(`.port[data-port="${portName}"][data-dir="${dir}"]`);
+  if (!port) {
+    if (dir === 'output') return { x: nodeEl.offsetLeft + nodeEl.offsetWidth, y: nodeEl.offsetTop + nodeEl.offsetHeight / 2 };
+    return { x: nodeEl.offsetLeft, y: nodeEl.offsetTop + nodeEl.offsetHeight / 2 };
+  }
+  const canvasRect = canvas.getBoundingClientRect();
+  const portRect = port.getBoundingClientRect();
+  return {
+    x: portRect.left + portRect.width / 2 - canvasRect.left,
+    y: portRect.top + portRect.height / 2 - canvasRect.top,
+  };
+}
+
 function renderEdges(tempEnd = null) {
   const svg = document.getElementById('edgeLayer');
-  // 清除旧路径（保留 defs）
   svg.querySelectorAll('path, .edge-hit').forEach(p => p.remove());
 
   const rect = canvas.getBoundingClientRect();
@@ -412,25 +439,21 @@ function renderEdges(tempEnd = null) {
   svg.setAttribute('height', rect.height);
 
   edges.forEach(edge => {
-    const s = document.getElementById(`cn-${edge.source}`);
-    const t = document.getElementById(`cn-${edge.target}`);
-    if (!s || !t) return;
-    const x1 = s.offsetLeft + s.offsetWidth;
-    const y1 = s.offsetTop + s.offsetHeight / 2;
-    const x2 = t.offsetLeft;
-    const y2 = t.offsetTop + t.offsetHeight / 2;
+    const sPos = getPortPos(edge.source, edge.sourcePort, 'output');
+    const tPos = getPortPos(edge.target, edge.targetPort, 'input');
+    if (!sPos || !tPos) return;
+    const x1 = sPos.x, y1 = sPos.y;
+    const x2 = tPos.x, y2 = tPos.y;
     const mx = (x1 + x2) / 2;
     const path = createPath(x1, y1, mx, y1, mx, y2, x2, y2);
 
-    // 选中高亮
     if (selectedEdge === edge.id) {
       path.setAttribute('stroke', 'var(--danger)');
       path.setAttribute('stroke-width', '3');
     }
     svg.appendChild(path);
 
-    // 不可见的宽点击区域（方便点中连线）
-    const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    const hit = document.createElementNS('http://www.w3.org/2000', 'path');
     hit.setAttribute('d', path.getAttribute('d'));
     hit.setAttribute('stroke', 'transparent');
     hit.setAttribute('stroke-width', '16');
@@ -441,7 +464,6 @@ function renderEdges(tempEnd = null) {
       ev.stopPropagation();
       selectEdge(edge.id);
     });
-    // 双击删除
     hit.addEventListener('dblclick', (ev) => {
       ev.stopPropagation();
       deleteEdge(edge.id);
@@ -451,11 +473,10 @@ function renderEdges(tempEnd = null) {
 
   // 临时连线（拖拽中）
   if (tempEnd && connectSource) {
-    const s = document.getElementById(`cn-${connectSource}`);
-    if (s) {
+    const sPos = getPortPos(connectSource, connectSourcePort, connectDir);
+    if (sPos) {
       const isOutput = connectDir === 'output';
-      const x1 = isOutput ? s.offsetLeft + s.offsetWidth : s.offsetLeft;
-      const y1 = s.offsetTop + s.offsetHeight / 2;
+      const x1 = sPos.x, y1 = sPos.y;
       const x2 = tempEnd.clientX - rect.left;
       const y2 = tempEnd.clientY - rect.top;
       const mx = (x1 + x2) / 2;
@@ -478,7 +499,7 @@ function selectEdge(edgeId) {
   renderEdges();
   if (selectedEdge) {
     const edge = edges.find(e => e.id === edgeId);
-    if (edge) addLog(`选中连线: ${edge.source} → ${edge.target}`);
+    if (edge) addLog(`选中连线: ${edge.source}.${edge.sourcePort || '?'} → ${edge.target}.${edge.targetPort || '?'}`);
   }
 }
 
@@ -489,7 +510,7 @@ function deleteEdge(edgeId) {
   edges.splice(idx, 1);
   if (selectedEdge === edgeId) selectedEdge = null;
   renderEdges();
-  addLog(`删除连线: ${edge.source} → ${edge.target}`);
+  addLog(`删除连线: ${edge.source}.${edge.sourcePort || '?'} → ${edge.target}.${edge.targetPort || '?'}`);
 }
 
 function createPath(x1, y1, cx1, cy1, cx2, cy2, x2, y2) {
@@ -660,6 +681,8 @@ function buildGraphPayload(targetNodeId = null) {
   const graphEdges = edges.map(e => ({
     source: e.source,
     target: e.target,
+    sourcePort: e.sourcePort || null,
+    targetPort: e.targetPort || null,
   }));
 
   const body = {

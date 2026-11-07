@@ -106,13 +106,35 @@ def _get_upstream_ids(node_id, edges):
 
 
 def _collect_inputs(node_id, edges, cache):
-    """从上游节点的缓存输出中收集输入数据。"""
+    """从上游节点的缓存输出中收集输入数据（支持端口级路由）。
+    
+    如果边携带 sourcePort/targetPort，则按端口映射：
+        inputs[targetPort] = upstream_output[sourcePort]
+    否则向后兼容（合并所有输出 key）。
+    
+    特殊情况：同一 targetPort 有多条连线时（如 comparison），
+    收集为列表。
+    """
     inputs = {}
     for e in edges:
-        if e["target"] == node_id:
-            cached = cache.get(e["source"])
-            if cached and "output" in cached:
-                inputs.update(cached["output"])
+        if e["target"] != node_id:
+            continue
+        cached = cache.get(e["source"])
+        if not cached or "output" not in cached:
+            continue
+        source_port = e.get("sourcePort")
+        target_port = e.get("targetPort")
+        if source_port and target_port and source_port in cached["output"]:
+            port_data = cached["output"][source_port]
+            if target_port in inputs:
+                if isinstance(inputs[target_port], list):
+                    inputs[target_port].append(port_data)
+                else:
+                    inputs[target_port] = [inputs[target_port], port_data]
+            else:
+                inputs[target_port] = port_data
+        else:
+            inputs.update(cached["output"])
     return inputs
 
 
@@ -124,7 +146,7 @@ def _exec_dataset(node, inputs, llm=None):
     ds = ds_class()
     X, y = ds.load()
     summary = ds.summary()
-    output = {"X": X, "y": y, "task_type": ds.task_type, "feature_names": ds.feature_names(), "data_summary": summary}
+    output = {"data": {"X": X, "y": y, "task_type": ds.task_type, "feature_names": ds.feature_names(), "data_summary": summary}}
     display = {"n_samples": summary["n_samples"], "n_features": summary["n_features"], "task_type": ds.task_type}
     return output, display
 
@@ -136,13 +158,14 @@ def _exec_csv_upload(node, inputs, llm=None):
     ds = ds_class()
     X, y = ds.load()
     summary = ds.summary()
-    output = {"X": X, "y": y, "task_type": ds.task_type, "feature_names": ds.feature_names(), "data_summary": summary}
+    output = {"data": {"X": X, "y": y, "task_type": ds.task_type, "feature_names": ds.feature_names(), "data_summary": summary}}
     display = {"n_samples": summary["n_samples"], "n_features": summary["n_features"], "task_type": ds.task_type}
     return output, display
 
 
 def _exec_data_analysis(node, inputs, llm=None):
-    summary = inputs.get("data_summary", {})
+    data = inputs.get("data", {})
+    summary = data.get("data_summary", {})
     output = {"summary": summary}
     display = summary
     return output, display
@@ -150,86 +173,98 @@ def _exec_data_analysis(node, inputs, llm=None):
 
 def _exec_split(node, inputs, llm=None):
     cfg = node.get("config", {})
-    X, y = inputs["X"], inputs["y"]
+    data = inputs.get("data", {})
+    X, y = data["X"], data["y"]
     test_size = float(cfg.get("test_size", 0.2))
     seed = int(cfg.get("seed", 42))
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=seed)
-    task_type = inputs.get("task_type", "regression")
-    output = {"X_train": X_train, "X_test": X_test, "y_train": y_train, "y_test": y_test, "task_type": task_type}
+    task_type = data.get("task_type", "regression")
+    output = {
+        "train": {"X": X_train, "y": y_train, "task_type": task_type},
+        "test": {"X": X_test, "y": y_test, "task_type": task_type},
+    }
     display = {"train_size": len(X_train), "test_size": len(X_test), "test_ratio": test_size, "seed": seed}
     return output, display
 
 
 def _exec_model(node, inputs, llm=None):
     cfg = node.get("config", {})
+    train = inputs.get("train", {})
+    test = inputs.get("test", {})
     model_name = cfg.get("model_name", "linear_regression")
     model_class = get_model_class(model_name)
     model = model_class()
-    model.fit(inputs["X_train"], inputs["y_train"])
-    y_pred = model.predict(inputs["X_test"])
-    task_type = inputs.get("task_type", "regression")
-    output = {"model": model, "y_pred": y_pred, "y_test": inputs["y_test"], "model_name": model_name, "task_type": task_type, "params": model.get_params()}
+    model.fit(train["X"], train["y"])
+    y_pred = model.predict(test["X"])
+    task_type = train.get("task_type", "regression")
+    output = {"model": {"model": model, "y_pred": y_pred, "y_test": test["y"], "model_name": model_name, "task_type": task_type, "params": model.get_params()}}
     display = {"model_name": model_name, "params": model.get_params()}
     return output, display
 
 
 def _exec_search(node, inputs, llm=None):
     cfg = node.get("config", {})
-    model_name = cfg.get("model_name", inputs.get("model_name", "linear_regression"))
+    train = inputs.get("train", {})
+    test = inputs.get("test", {})
+    model_name = cfg.get("model_name", "linear_regression")
     model_class = get_model_class(model_name)
     base_model = model_class()
     param_space = base_model.param_space()
     n_iter = int(cfg.get("n_iter", 10))
     cv = int(cfg.get("cv", 5))
-    task_type = inputs.get("task_type", "regression")
+    task_type = train.get("task_type", "regression")
 
     if not param_space:
-        base_model.fit(inputs["X_train"], inputs["y_train"])
-        y_pred = base_model.predict(inputs["X_test"])
-        output = {"model": base_model, "y_pred": y_pred, "y_test": inputs["y_test"], "model_name": model_name, "task_type": task_type, "params": base_model.get_params(), "search_info": {"note": "无搜索空间，使用默认参数"}}
+        base_model.fit(train["X"], train["y"])
+        y_pred = base_model.predict(test["X"])
+        output = {"model": {"model": base_model, "y_pred": y_pred, "y_test": test["y"], "model_name": model_name, "task_type": task_type, "params": base_model.get_params(), "search_info": {"note": "无搜索空间，使用默认参数"}}}
         display = {"model_name": model_name, "params": base_model.get_params(), "search": "无搜索空间"}
         return output, display
 
     search = RandomizedSearchCV(base_model._model if hasattr(base_model, "_model") else base_model, param_space, n_iter=n_iter, cv=cv, random_state=42)
-    search.fit(inputs["X_train"], inputs["y_train"])
-    y_pred = search.predict(inputs["X_test"])
-    output = {"model": search.best_estimator_, "y_pred": y_pred, "y_test": inputs["y_test"], "model_name": model_name, "task_type": task_type, "params": search.best_params_, "search_info": {"best_params": search.best_params_, "best_score": float(search.best_score_)}}
+    search.fit(train["X"], train["y"])
+    y_pred = search.predict(test["X"])
+    output = {"model": {"model": search.best_estimator_, "y_pred": y_pred, "y_test": test["y"], "model_name": model_name, "task_type": task_type, "params": search.best_params_, "search_info": {"best_params": search.best_params_, "best_score": float(search.best_score_)}}}
     display = {"model_name": model_name, "params": search.best_params_, "search": f"best_score={search.best_score_:.4f}"}
     return output, display
 
 
 def _exec_metric(node, inputs, llm=None):
-    task_type = inputs.get("task_type", "regression")
-    y_test = inputs["y_test"]
-    y_pred = inputs["y_pred"]
+    model_data = inputs.get("model", {})
+    task_type = model_data.get("task_type", "regression")
+    y_test = model_data["y_test"]
+    y_pred = model_data["y_pred"]
     metrics = _evaluate(task_type, y_test, y_pred)
-    model_name = inputs.get("model_name", "")
-    output = {"metrics": metrics, "model_name": model_name, "task_type": task_type}
+    model_name = model_data.get("model_name", "")
+    output = {"metrics": {"metrics": metrics, "model_name": model_name, "task_type": task_type}}
     display = metrics
     return output, display
 
 
 def _exec_llm_pre(node, inputs, llm=None):
     if not llm or not llm.available:
-        output = {"content": "", "structured": None, "parse_failed": True, "stage": "pre_train"}
+        output = {"analysis": {"content": "", "structured": None, "parse_failed": True, "stage": "pre_train"}}
         display = {"content": "", "stage": "pre_train"}
         return output, display
-    result = llm.analyze_data(inputs.get("data_summary", {}))
-    output = {"content": result["content"], "structured": result["structured"], "parse_failed": result["parse_failed"], "stage": "pre_train"}
+    data = inputs.get("data", {})
+    result = llm.analyze_data(data.get("data_summary", {}))
+    output = {"analysis": {"content": result["content"], "structured": result["structured"], "parse_failed": result["parse_failed"], "stage": "pre_train"}}
     display = {"content": result["content"][:200], "stage": "pre_train"}
     return output, display
 
 
 def _exec_llm_post(node, inputs, llm=None):
+    metrics_data = inputs.get("metrics", {})
+    data_data = inputs.get("data", {})
+    model_name = metrics_data.get("model_name", "")
+    metrics = metrics_data.get("metrics", {})
+    data_summary = data_data.get("data_summary", {})
     if not llm or not llm.available:
-        output = {"content": "", "structured": None, "parse_failed": True, "stage": "post_train", "model_name": inputs.get("model_name", "")}
+        output = {"interpretation": {"content": "", "structured": None, "parse_failed": True, "stage": "post_train", "model_name": model_name}}
         display = {"content": "", "stage": "post_train"}
         return output, display
-    model_name = inputs.get("model_name", "")
-    metrics = inputs.get("metrics", {})
-    data_summary = inputs.get("data_summary", {})
     result = llm.analyze_results(model_name, metrics, data_summary)
-    output = {"content": result["content"], "structured": result["structured"], "parse_failed": result["parse_failed"], "stage": "post_train", "model_name": model_name}
+    output = {"interpretation": {"content": result["content"], "structured": result["structured"], "parse_failed": result["parse_failed"], "stage": "post_train", "model_name": model_name}}
     display = {"content": result["content"][:200], "stage": "post_train", "model_name": model_name}
     return output, display
 
@@ -327,7 +362,12 @@ def run_graph(nodes_data, edges_data, target_node_id=None, on_step=None, llm=Non
                 for e in upstream_edges:
                     cached = _data_cache.get(e["source"])
                     if cached and "output" in cached:
-                        all_metrics.append(cached["output"])
+                        source_port = e.get("sourcePort", "metrics")
+                        if source_port in cached["output"]:
+                            port_data = cached["output"][source_port]
+                            all_metrics.append(port_data)
+                        else:
+                            all_metrics.append(cached["output"])
 
                 if all_metrics:
                     task_type = all_metrics[0].get("task_type", "regression")
@@ -355,9 +395,10 @@ def run_graph(nodes_data, edges_data, target_node_id=None, on_step=None, llm=Non
 
             # 收集 metrics
             if node_type == "metric":
-                model_name = output.get("model_name", "")
-                metrics[model_name] = output.get("metrics", {})
-                model_results.append({"node_id": node_id, "model_name": model_name, "metrics": output["metrics"], "task_type": output.get("task_type", "regression")})
+                metrics_data = output.get("metrics", {})
+                model_name = metrics_data.get("model_name", "")
+                metrics[model_name] = metrics_data.get("metrics", {})
+                model_results.append({"node_id": node_id, "model_name": model_name, "metrics": metrics_data.get("metrics", {}), "task_type": metrics_data.get("task_type", "regression")})
 
             _emit(node_type, "success", f"{node_label} 完成", node_id=node_id, display=display)
 
